@@ -36,13 +36,14 @@ export type WatchlistStackParamList = {
 export type DashboardStackParamList = {
   Dashboard: undefined;
   MyBids: undefined;
-  MyOffers: undefined;
+  MyOffers: { viewMode?: 'sent' | 'received'; filter?: 'all' | 'pending' | 'accepted' | 'declined' | 'countered' | 'expired' | 'withdrawn' } | undefined;
   MyInvoices: undefined;
   MySales: undefined;
   MyListings: undefined;
-  SellerOffers: undefined;
+  SellerOffers: { viewMode?: 'sent' | 'received' } | undefined;
   InvoiceDetail: { invoiceId: string };
   ListingDetail: { listingId: string };
+  MakeOffer: { listingId: string; parentOfferId?: string; suggestedAmount?: number };
   Checkout: { invoiceId: string };
   CreateListing: undefined;
   EditListing: { listingId: string };
@@ -64,10 +65,11 @@ export type ProfileStackParamList = {
   Notifications: undefined;
   NotificationSettings: undefined;
   PaymentMethods: undefined;
+  WireInstructions: undefined;
   SellerDashboard: undefined;
   MyListings: undefined;
   MySales: undefined;
-  SellerOffers: undefined;
+  SellerOffers: { viewMode?: 'sent' | 'received' } | undefined;
   CreateListing: undefined;
   EditListing: { listingId: string };
   ListingDetail: { listingId: string };

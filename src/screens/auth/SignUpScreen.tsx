@@ -15,6 +15,7 @@ import {
 import { Feather } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { AuthStackParamList } from '../../navigation/types';
 import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 
@@ -22,6 +23,7 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'SignUp'>;
 
 export default function SignUpScreen({ navigation }: Props) {
   const { signUp } = useAuth();
+  const { colors: themeColors, isDark } = useTheme();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -75,13 +77,14 @@ export default function SignUpScreen({ navigation }: Props) {
   ) => (
     <View style={[
       styles.inputWrapper,
-      focusedInput === inputKey && styles.inputWrapperFocused
+      { backgroundColor: isDark ? themeColors.sand : '#ffffff', borderColor: themeColors.border },
+      focusedInput === inputKey && [styles.inputWrapperFocused, { borderColor: themeColors.accent }]
     ]}>
-      <Feather name={icon} size={18} color={colors.textMuted} style={styles.inputIcon} />
+      <Feather name={icon} size={18} color={themeColors.textMuted} style={styles.inputIcon} />
       <TextInput
-        style={styles.input}
+        style={[styles.input, { color: themeColors.textPrimary }]}
         placeholder={placeholder}
-        placeholderTextColor={colors.textLight}
+        placeholderTextColor={themeColors.textMuted}
         value={value}
         onChangeText={onChangeText}
         secureTextEntry={options?.secureTextEntry && !showPassword}
@@ -95,7 +98,7 @@ export default function SignUpScreen({ navigation }: Props) {
           <Feather
             name={showPassword ? 'eye-off' : 'eye'}
             size={18}
-            color={colors.textMuted}
+            color={themeColors.textMuted}
           />
         </Pressable>
       )}
@@ -104,7 +107,7 @@ export default function SignUpScreen({ navigation }: Props) {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: themeColors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
@@ -116,21 +119,21 @@ export default function SignUpScreen({ navigation }: Props) {
           {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity
-              style={styles.backButton}
+              style={[styles.backButton, { backgroundColor: themeColors.accentFaint }]}
               onPress={() => navigation.goBack()}
             >
-              <Feather name="arrow-left" size={24} color={colors.accent} />
+              <Feather name="arrow-left" size={24} color={themeColors.accent} />
             </TouchableOpacity>
             <View style={styles.logoRow}>
-              <View style={styles.logoContainer}>
+              <View style={[styles.logoContainer, { backgroundColor: themeColors.accent }]}>
                 <Text style={styles.logoText}>PMB</Text>
               </View>
               <View style={styles.titleColumn}>
                 <View style={styles.titleRow}>
-                  <Text style={styles.titlePrimary}>PrintMail</Text>
-                  <Text style={styles.titleAccent}>Bids</Text>
+                  <Text style={[styles.titlePrimary, { color: themeColors.textPrimary }]}>PrintMail</Text>
+                  <Text style={[styles.titleAccent, { color: themeColors.accent }]}>Bids</Text>
                 </View>
-                <Text style={styles.subtitle}>Create your account</Text>
+                <Text style={[styles.subtitle, { color: themeColors.textMuted }]}>Create your account</Text>
               </View>
             </View>
           </View>
@@ -138,14 +141,14 @@ export default function SignUpScreen({ navigation }: Props) {
           {/* Form */}
           <View style={styles.form}>
             <View style={styles.inputContainer}>
-              <Text style={styles.label}>Full Name</Text>
+              <Text style={[styles.label, { color: themeColors.textPrimary }]}>Full Name</Text>
               {renderInput('user', 'Enter your full name', fullName, setFullName, 'name', {
                 autoCapitalize: 'words',
               })}
             </View>
 
             <View style={styles.inputContainer}>
-              <Text style={styles.label}>Email</Text>
+              <Text style={[styles.label, { color: themeColors.textPrimary }]}>Email</Text>
               {renderInput('mail', 'Enter your email', email, setEmail, 'email', {
                 keyboardType: 'email-address',
                 autoCapitalize: 'none',
@@ -153,14 +156,14 @@ export default function SignUpScreen({ navigation }: Props) {
             </View>
 
             <View style={styles.inputContainer}>
-              <Text style={styles.label}>Password</Text>
+              <Text style={[styles.label, { color: themeColors.textPrimary }]}>Password</Text>
               {renderInput('lock', 'Create a password', password, setPassword, 'password', {
                 secureTextEntry: true,
               })}
             </View>
 
             <View style={styles.inputContainer}>
-              <Text style={styles.label}>Confirm Password</Text>
+              <Text style={[styles.label, { color: themeColors.textPrimary }]}>Confirm Password</Text>
               {renderInput('lock', 'Confirm your password', confirmPassword, setConfirmPassword, 'confirm', {
                 secureTextEntry: true,
               })}
@@ -172,10 +175,11 @@ export default function SignUpScreen({ navigation }: Props) {
                 <Feather
                   name={password.length >= 6 ? 'check-circle' : 'circle'}
                   size={14}
-                  color={password.length >= 6 ? colors.success : colors.textLight}
+                  color={password.length >= 6 ? colors.success : themeColors.textMuted}
                 />
                 <Text style={[
                   styles.requirementText,
+                  { color: themeColors.textMuted },
                   password.length >= 6 && styles.requirementMet
                 ]}>
                   At least 6 characters
@@ -185,10 +189,11 @@ export default function SignUpScreen({ navigation }: Props) {
                 <Feather
                   name={password === confirmPassword && password.length > 0 ? 'check-circle' : 'circle'}
                   size={14}
-                  color={password === confirmPassword && password.length > 0 ? colors.success : colors.textLight}
+                  color={password === confirmPassword && password.length > 0 ? colors.success : themeColors.textMuted}
                 />
                 <Text style={[
                   styles.requirementText,
+                  { color: themeColors.textMuted },
                   password === confirmPassword && password.length > 0 && styles.requirementMet
                 ]}>
                   Passwords match
@@ -198,7 +203,7 @@ export default function SignUpScreen({ navigation }: Props) {
 
             {/* Sign Up Button */}
             <TouchableOpacity
-              style={[styles.button, isLoading && styles.buttonDisabled]}
+              style={[styles.button, { backgroundColor: themeColors.accent }, isLoading && styles.buttonDisabled]}
               onPress={handleSignUp}
               disabled={isLoading}
               activeOpacity={0.8}
@@ -216,9 +221,9 @@ export default function SignUpScreen({ navigation }: Props) {
 
           {/* Sign In Link */}
           <View style={styles.footer}>
-            <Text style={styles.footerText}>Already have an account?</Text>
+            <Text style={[styles.footerText, { color: themeColors.textMuted }]}>Already have an account?</Text>
             <TouchableOpacity onPress={() => navigation.navigate('SignIn')}>
-              <Text style={styles.footerLink}> Sign in</Text>
+              <Text style={[styles.footerLink, { color: themeColors.accent }]}> Sign in</Text>
             </TouchableOpacity>
           </View>
         </View>

@@ -17,6 +17,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 import { formatCurrency, formatRelativeTime } from '../../utils/formatters';
 import { lightTap, successFeedback, errorFeedback } from '../../utils/haptics';
@@ -25,7 +26,7 @@ interface Listing {
   id: string;
   title: string;
   status: 'draft' | 'pending' | 'active' | 'ended' | 'sold' | 'cancelled';
-  listing_type: 'auction' | 'fixed_price' | 'both';
+  listing_type: 'auction' | 'make_offer' | 'auction_with_offers';
   starting_price: number | null;
   fixed_price: number | null;
   current_bid: number | null;
@@ -46,6 +47,7 @@ export default function AdminListingsScreen() {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const { profile } = useAuth();
+  const { colors: themeColors, isDark } = useTheme();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterType>('all');
@@ -127,13 +129,21 @@ export default function AdminListingsScreen() {
 
   const FilterButton = ({ type, label }: { type: FilterType; label: string }) => (
     <TouchableOpacity
-      style={[styles.filterButton, filter === type && styles.filterButtonActive]}
+      style={[
+        styles.filterButton,
+        { backgroundColor: themeColors.surface },
+        filter === type && { backgroundColor: themeColors.accent }
+      ]}
       onPress={() => {
         lightTap();
         setFilter(type);
       }}
     >
-      <Text style={[styles.filterButtonText, filter === type && styles.filterButtonTextActive]}>
+      <Text style={[
+        styles.filterButtonText,
+        { color: themeColors.textSecondary },
+        filter === type && { color: colors.white }
+      ]}>
         {label}
       </Text>
     </TouchableOpacity>
@@ -145,7 +155,7 @@ export default function AdminListingsScreen() {
 
     return (
       <TouchableOpacity
-        style={styles.listingCard}
+        style={[styles.listingCard, { backgroundColor: themeColors.surface }]}
         onPress={() => navigation.navigate('HomeTab', { screen: 'ListingDetail', params: { listingId: item.id } })}
       >
         <Image
@@ -156,29 +166,29 @@ export default function AdminListingsScreen() {
 
         <View style={styles.listingContent}>
           <View style={styles.listingHeader}>
-            <Text style={styles.listingTitle} numberOfLines={2}>{item.title}</Text>
+            <Text style={[styles.listingTitle, { color: themeColors.textPrimary }]} numberOfLines={2}>{item.title}</Text>
             <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
               <Text style={styles.statusText}>{item.status}</Text>
             </View>
           </View>
 
-          <Text style={styles.sellerName}>
+          <Text style={[styles.sellerName, { color: themeColors.textMuted }]}>
             by {item.seller?.company_name || item.seller?.full_name || 'Unknown'}
           </Text>
 
           <View style={styles.listingMeta}>
-            <Text style={styles.price}>{formatCurrency(price)}</Text>
-            <Text style={styles.metaText}>
+            <Text style={[styles.price, { color: themeColors.accent }]}>{formatCurrency(price)}</Text>
+            <Text style={[styles.metaText, { color: themeColors.textMuted }]}>
               {item.listing_type === 'auction' ? `${item.bid_count || 0} bids` : 'Fixed Price'}
             </Text>
           </View>
 
-          <Text style={styles.dateText}>
+          <Text style={[styles.dateText, { color: themeColors.textMuted }]}>
             Created {formatRelativeTime(item.created_at)}
           </Text>
 
           {/* Quick Actions */}
-          <View style={styles.actionRow}>
+          <View style={[styles.actionRow, { borderTopColor: themeColors.border }]}>
             {item.status === 'pending' && (
               <TouchableOpacity
                 style={[styles.actionButton, styles.approveButton]}
@@ -223,36 +233,36 @@ export default function AdminListingsScreen() {
 
   if (!profile?.is_admin) {
     return (
-      <View style={styles.unauthorizedContainer}>
+      <View style={[styles.unauthorizedContainer, { backgroundColor: themeColors.background }]}>
         <Feather name="shield-off" size={48} color={colors.error} />
-        <Text style={styles.unauthorizedText}>Access Denied</Text>
+        <Text style={[styles.unauthorizedText, { color: themeColors.textMuted }]}>Access Denied</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchInputContainer}>
-          <Feather name="search" size={20} color={colors.textMuted} />
+      <View style={[styles.searchContainer, { backgroundColor: themeColors.surface, borderBottomColor: themeColors.border }]}>
+        <View style={[styles.searchInputContainer, { backgroundColor: themeColors.inputBackground }]}>
+          <Feather name="search" size={20} color={themeColors.textMuted} />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: themeColors.textPrimary }]}
             placeholder="Search listings..."
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={themeColors.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Feather name="x" size={20} color={colors.textMuted} />
+              <Feather name="x" size={20} color={themeColors.textMuted} />
             </TouchableOpacity>
           )}
         </View>
       </View>
 
       {/* Filters */}
-      <View style={styles.filterRow}>
+      <View style={[styles.filterRow, { backgroundColor: themeColors.surface, borderBottomColor: themeColors.border }]}>
         <FilterButton type="all" label="All" />
         <FilterButton type="pending" label="Pending" />
         <FilterButton type="active" label="Active" />
@@ -263,7 +273,7 @@ export default function AdminListingsScreen() {
       {/* Listings List */}
       {isLoading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.accent} />
+          <ActivityIndicator size="large" color={themeColors.accent} />
         </View>
       ) : (
         <FlatList
@@ -272,13 +282,13 @@ export default function AdminListingsScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + spacing.xl }]}
           refreshControl={
-            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.accent} />
+            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={themeColors.accent} />
           }
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Feather name="package" size={48} color={colors.textLight} />
-              <Text style={styles.emptyTitle}>No Listings Found</Text>
-              <Text style={styles.emptyText}>
+              <Feather name="package" size={48} color={themeColors.textMuted} />
+              <Text style={[styles.emptyTitle, { color: themeColors.textPrimary }]}>No Listings Found</Text>
+              <Text style={[styles.emptyText, { color: themeColors.textMuted }]}>
                 {searchQuery ? 'Try a different search term' : 'No listings match the current filter'}
               </Text>
             </View>

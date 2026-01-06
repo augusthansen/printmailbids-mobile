@@ -17,6 +17,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { ListingWithDetails } from '../../types/database';
 import { HomeStackParamList } from '../../navigation/types';
 import { formatCurrency, formatTimeRemaining } from '../../utils/formatters';
@@ -46,6 +47,7 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
   const { listingId } = route.params;
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { colors: themeColors, isDark } = useTheme();
   const queryClient = useQueryClient();
 
   const [bidAmount, setBidAmount] = useState('');
@@ -112,6 +114,29 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
         throw new Error('Maximum bid must be greater than or equal to your bid');
       }
 
+      // Ensure bidder profile exists (foreign key requirement)
+      const { data: existingProfile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (!existingProfile) {
+        // Create profile if it doesn't exist using upsert
+        // Only include core columns that exist in the database
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .upsert({
+            id: user.id,
+            email: user.email,
+            full_name: user.user_metadata?.full_name || null,
+          }, { onConflict: 'id' });
+
+        if (profileError) {
+          throw new Error('Your profile could not be created. Please contact support or try logging out and back in.');
+        }
+      }
+
       // Place the bid via Supabase function or direct insert
       const { data, error } = await supabase
         .from('bids')
@@ -127,6 +152,18 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
         .single();
 
       if (error) throw error;
+
+      // Create notification for the seller
+      if (listing) {
+        await supabase.from('notifications').insert({
+          user_id: listing.seller_id,
+          type: 'new_bid',
+          title: `New bid: ${formatCurrency(amount)}`,
+          body: `Someone placed a bid of ${formatCurrency(amount)} on "${listing.title}"`,
+          listing_id: listingId,
+          bid_id: data.id,
+        });
+      }
 
       // Update the listing's current bid (this would normally be handled by a database trigger)
       // For now, we'll just invalidate and refetch
@@ -181,18 +218,18 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
 
   if (isLoading) {
     return (
-      <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={colors.accent} />
+      <View style={[styles.loadingContainer, { paddingTop: insets.top, backgroundColor: themeColors.background }]}>
+        <ActivityIndicator size="large" color={themeColors.accent} />
       </View>
     );
   }
 
   if (!listing) {
     return (
-      <View style={[styles.errorContainer, { paddingTop: insets.top }]}>
-        <Feather name="alert-circle" size={48} color={colors.textMuted} />
-        <Text style={styles.errorText}>Listing not found</Text>
-        <TouchableOpacity style={styles.closeButton} onPress={() => navigation.goBack()}>
+      <View style={[styles.errorContainer, { paddingTop: insets.top, backgroundColor: themeColors.background }]}>
+        <Feather name="alert-circle" size={48} color={themeColors.textMuted} />
+        <Text style={[styles.errorText, { color: themeColors.textMuted }]}>Listing not found</Text>
+        <TouchableOpacity style={[styles.closeButton, { backgroundColor: themeColors.accent }]} onPress={() => navigation.goBack()}>
           <Text style={styles.closeButtonText}>Close</Text>
         </TouchableOpacity>
       </View>
@@ -207,15 +244,15 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: themeColors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
+      <View style={[styles.header, { paddingTop: insets.top + spacing.sm, backgroundColor: themeColors.surface, borderBottomColor: themeColors.border }]}>
         <TouchableOpacity style={styles.closeIcon} onPress={() => navigation.goBack()}>
-          <Feather name="x" size={24} color={colors.textPrimary} />
+          <Feather name="x" size={24} color={themeColors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Place Bid</Text>
+        <Text style={[styles.headerTitle, { color: themeColors.textPrimary }]}>Place Bid</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -225,12 +262,12 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
         keyboardShouldPersistTaps="handled"
       >
         {/* Listing Summary */}
-        <View style={styles.listingSummary}>
-          <Text style={styles.listingTitle} numberOfLines={2}>{listing.title}</Text>
+        <View style={[styles.listingSummary, { backgroundColor: themeColors.surface }]}>
+          <Text style={[styles.listingTitle, { color: themeColors.textPrimary }]} numberOfLines={2}>{listing.title}</Text>
 
           <View style={styles.priceInfo}>
             <View>
-              <Text style={styles.priceLabel}>
+              <Text style={[styles.priceLabel, { color: themeColors.textMuted }]}>
                 {listing.current_bid ? 'Current Bid' : 'Starting Price'}
               </Text>
               <Text style={styles.currentPrice}>{formatCurrency(currentPrice)}</Text>
@@ -277,19 +314,21 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
         </View>
 
         {/* Bid Input Section */}
-        <View style={styles.bidSection}>
-          <Text style={styles.sectionTitle}>Your Bid</Text>
+        <View style={[styles.bidSection, { backgroundColor: themeColors.surface }]}>
+          <Text style={[styles.sectionTitle, { color: themeColors.textPrimary }]}>Your Bid</Text>
 
           <View style={styles.minimumBidInfo}>
-            <Text style={styles.minimumBidLabel}>Minimum bid:</Text>
-            <Text style={styles.minimumBidValue}>{formatCurrency(minimumBid)}</Text>
+            <Text style={[styles.minimumBidLabel, { color: themeColors.textMuted }]}>Minimum bid:</Text>
+            <Text style={[styles.minimumBidValue, { color: themeColors.accent }]}>
+              {formatCurrency(minimumBid)}
+            </Text>
             <Text style={styles.incrementInfo}>(${bidIncrement} increments)</Text>
           </View>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.currencySymbol}>$</Text>
+          <View style={[styles.inputContainer, { backgroundColor: isDark ? themeColors.sand : '#ffffff', borderColor: themeColors.border }]}>
+            <Text style={[styles.currencySymbol, { color: themeColors.textPrimary }]}>$</Text>
             <TextInput
-              style={styles.bidInput}
+              style={[styles.bidInput, { color: themeColors.textPrimary }]}
               value={bidAmount}
               onChangeText={setBidAmount}
               keyboardType="numeric"
@@ -304,50 +343,56 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
               style={styles.quickBidButton}
               onPress={() => setBidAmount(minimumBid.toString())}
             >
-              <Text style={styles.quickBidText}>Min</Text>
-              <Text style={styles.quickBidAmount}>{formatCurrency(minimumBid)}</Text>
+              <Text style={[styles.quickBidText, { color: themeColors.accent }]}>Min</Text>
+              <Text style={[styles.quickBidAmount, { color: themeColors.textPrimary }]}>
+                {formatCurrency(minimumBid)}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.quickBidButton}
               onPress={() => handleQuickBid(1)}
             >
-              <Text style={styles.quickBidText}>+1</Text>
-              <Text style={styles.quickBidAmount}>{formatCurrency(minimumBid + bidIncrement)}</Text>
+              <Text style={[styles.quickBidText, { color: themeColors.accent }]}>+1</Text>
+              <Text style={[styles.quickBidAmount, { color: themeColors.textPrimary }]}>
+                {formatCurrency(minimumBid + bidIncrement)}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.quickBidButton}
               onPress={() => handleQuickBid(5)}
             >
-              <Text style={styles.quickBidText}>+5</Text>
-              <Text style={styles.quickBidAmount}>{formatCurrency(minimumBid + 5 * bidIncrement)}</Text>
+              <Text style={[styles.quickBidText, { color: themeColors.accent }]}>+5</Text>
+              <Text style={[styles.quickBidAmount, { color: themeColors.textPrimary }]}>
+                {formatCurrency(minimumBid + 5 * bidIncrement)}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
 
         {/* Proxy Bidding Section */}
-        <View style={styles.proxySection}>
+        <View style={[styles.proxySection, { backgroundColor: themeColors.surface }]}>
           <TouchableOpacity
             style={styles.proxyToggle}
             onPress={() => setUseProxyBidding(!useProxyBidding)}
           >
-            <View style={[styles.checkbox, useProxyBidding && styles.checkboxChecked]}>
+            <View style={[styles.checkbox, { borderColor: themeColors.border }, useProxyBidding && { backgroundColor: themeColors.accent, borderColor: themeColors.accent }]}>
               {useProxyBidding && <Feather name="check" size={14} color={colors.white} />}
             </View>
             <View style={styles.proxyInfo}>
-              <Text style={styles.proxyTitle}>Enable Proxy Bidding</Text>
-              <Text style={styles.proxyDescription}>
+              <Text style={[styles.proxyTitle, { color: themeColors.textPrimary }]}>Enable Proxy Bidding</Text>
+              <Text style={[styles.proxyDescription, { color: themeColors.textMuted }]}>
                 Set a maximum amount and we'll automatically bid for you up to that amount
               </Text>
             </View>
           </TouchableOpacity>
 
           {useProxyBidding && (
-            <View style={styles.maxBidContainer}>
-              <Text style={styles.maxBidLabel}>Maximum Bid</Text>
-              <View style={styles.inputContainer}>
-                <Text style={styles.currencySymbol}>$</Text>
+            <View style={[styles.maxBidContainer, { borderTopColor: themeColors.border }]}>
+              <Text style={[styles.maxBidLabel, { color: themeColors.textPrimary }]}>Maximum Bid</Text>
+              <View style={[styles.inputContainer, { backgroundColor: isDark ? themeColors.sand : '#ffffff', borderColor: themeColors.border }]}>
+                <Text style={[styles.currencySymbol, { color: themeColors.textPrimary }]}>$</Text>
                 <TextInput
-                  style={styles.bidInput}
+                  style={[styles.bidInput, { color: themeColors.textPrimary }]}
                   value={maxBidAmount}
                   onChangeText={setMaxBidAmount}
                   keyboardType="numeric"
@@ -355,7 +400,7 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
                   placeholderTextColor={colors.textLight}
                 />
               </View>
-              <Text style={styles.proxyHint}>
+              <Text style={[styles.proxyHint, { color: themeColors.textMuted }]}>
                 Your bid will start at {formatCurrency(bidAmountNum)} and automatically increase as needed up to your maximum.
               </Text>
             </View>
@@ -363,22 +408,28 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
         </View>
 
         {/* Cost Breakdown */}
-        <View style={styles.costBreakdown}>
-          <Text style={styles.sectionTitle}>Cost Breakdown</Text>
+        <View style={[styles.costBreakdown, { backgroundColor: themeColors.surface }]}>
+          <Text style={[styles.sectionTitle, { color: themeColors.textPrimary }]}>Cost Breakdown</Text>
 
           <View style={styles.costRow}>
             <Text style={styles.costLabel}>Your Bid</Text>
-            <Text style={styles.costValue}>{formatCurrency(bidAmountNum)}</Text>
+            <Text style={[styles.costValue, { color: themeColors.textPrimary }]}>
+              {formatCurrency(bidAmountNum)}
+            </Text>
           </View>
 
           <View style={styles.costRow}>
             <Text style={styles.costLabel}>Buyer Premium (8%)</Text>
-            <Text style={styles.costValue}>{formatCurrency(buyerPremium)}</Text>
+            <Text style={[styles.costValue, { color: themeColors.textPrimary }]}>
+              {formatCurrency(buyerPremium)}
+            </Text>
           </View>
 
-          <View style={[styles.costRow, styles.totalRow]}>
-            <Text style={styles.totalLabel}>Total if You Win</Text>
-            <Text style={styles.totalValue}>{formatCurrency(totalWithPremium)}</Text>
+          <View style={[styles.costRow, styles.totalRow, { borderTopColor: themeColors.border }]}>
+            <Text style={[styles.totalLabel, { color: themeColors.textPrimary }]}>Total if You Win</Text>
+            <Text style={[styles.totalValue, { color: themeColors.accent }]}>
+              {formatCurrency(totalWithPremium)}
+            </Text>
           </View>
 
           <Text style={styles.taxNote}>
@@ -388,17 +439,17 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
 
         {/* Terms Notice */}
         <View style={styles.termsNotice}>
-          <Feather name="info" size={16} color={colors.textMuted} />
-          <Text style={styles.termsText}>
+          <Feather name="info" size={16} color={themeColors.textMuted} />
+          <Text style={[styles.termsText, { color: themeColors.textMuted }]}>
             By placing a bid, you agree to purchase this item if you're the winning bidder. All sales are final.
           </Text>
         </View>
       </ScrollView>
 
       {/* Place Bid Button */}
-      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md, backgroundColor: themeColors.surface, borderTopColor: themeColors.border }]}>
         <TouchableOpacity
-          style={[styles.placeBidButton, placeBidMutation.isPending && styles.buttonDisabled]}
+          style={[styles.placeBidButton, { backgroundColor: themeColors.accent }, placeBidMutation.isPending && styles.buttonDisabled]}
           onPress={handlePlaceBid}
           disabled={placeBidMutation.isPending}
         >

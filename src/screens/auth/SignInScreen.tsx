@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { AuthStackParamList } from '../../navigation/types';
 import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 import { mediumTap, errorFeedback, successFeedback } from '../../utils/haptics';
@@ -25,6 +26,7 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'SignIn'>;
 export default function SignInScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const { signIn } = useAuth();
+  const { colors: themeColors, isDark } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -53,7 +55,7 @@ export default function SignInScreen({ navigation }: Props) {
 
   return (
     <KeyboardAvoidingView
-      style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
+      style={[styles.container, { backgroundColor: themeColors.background, paddingTop: insets.top, paddingBottom: insets.bottom }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
     >
@@ -71,28 +73,29 @@ export default function SignInScreen({ navigation }: Props) {
             </View>
             <View>
               <View style={styles.titleRow}>
-                <Text style={styles.titlePrimary}>PrintMail</Text>
-                <Text style={styles.titleAccent}>Bids</Text>
+                <Text style={[styles.titlePrimary, { color: themeColors.textPrimary }]}>PrintMail</Text>
+                <Text style={[styles.titleAccent, { color: themeColors.accent }]}>Bids</Text>
               </View>
             </View>
           </View>
-          <Text style={styles.subtitle}>Industrial Equipment Marketplace</Text>
+          <Text style={[styles.subtitle, { color: themeColors.textMuted }]}>Industrial Equipment Marketplace</Text>
         </View>
 
         {/* Form */}
         <View style={styles.form}>
           {/* Email Input */}
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>Email</Text>
+            <Text style={[styles.label, { color: themeColors.textPrimary }]}>Email</Text>
             <View style={[
               styles.inputWrapper,
-              focusedInput === 'email' && styles.inputWrapperFocused
+              { backgroundColor: isDark ? themeColors.sand : '#ffffff', borderColor: themeColors.border },
+              focusedInput === 'email' && [styles.inputWrapperFocused, { borderColor: themeColors.accent }]
             ]}>
-              <Feather name="mail" size={18} color={colors.textMuted} style={styles.inputIcon} />
+              <Feather name="mail" size={18} color={themeColors.textMuted} style={styles.inputIcon} />
               <TextInput
-                style={styles.input}
+                style={[styles.input, { color: themeColors.textPrimary }]}
                 placeholder="Enter your email"
-                placeholderTextColor={colors.textLight}
+                placeholderTextColor={themeColors.textMuted}
                 value={email}
                 onChangeText={setEmail}
                 autoCapitalize="none"
@@ -106,16 +109,17 @@ export default function SignInScreen({ navigation }: Props) {
 
           {/* Password Input */}
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>Password</Text>
+            <Text style={[styles.label, { color: themeColors.textPrimary }]}>Password</Text>
             <View style={[
               styles.inputWrapper,
-              focusedInput === 'password' && styles.inputWrapperFocused
+              { backgroundColor: isDark ? themeColors.sand : '#ffffff', borderColor: themeColors.border },
+              focusedInput === 'password' && [styles.inputWrapperFocused, { borderColor: themeColors.accent }]
             ]}>
-              <Feather name="lock" size={18} color={colors.textMuted} style={styles.inputIcon} />
+              <Feather name="lock" size={18} color={themeColors.textMuted} style={styles.inputIcon} />
               <TextInput
-                style={styles.input}
+                style={[styles.input, { color: themeColors.textPrimary }]}
                 placeholder="Enter your password"
-                placeholderTextColor={colors.textLight}
+                placeholderTextColor={themeColors.textMuted}
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
@@ -127,7 +131,7 @@ export default function SignInScreen({ navigation }: Props) {
                 <Feather
                   name={showPassword ? 'eye-off' : 'eye'}
                   size={18}
-                  color={colors.textMuted}
+                  color={themeColors.textMuted}
                 />
               </Pressable>
             </View>
@@ -138,12 +142,12 @@ export default function SignInScreen({ navigation }: Props) {
             style={styles.forgotButton}
             onPress={() => navigation.navigate('ForgotPassword')}
           >
-            <Text style={styles.forgotText}>Forgot password?</Text>
+            <Text style={[styles.forgotText, { color: themeColors.accent }]}>Forgot password?</Text>
           </TouchableOpacity>
 
           {/* Sign In Button */}
           <TouchableOpacity
-            style={[styles.button, isLoading && styles.buttonDisabled]}
+            style={[styles.button, { backgroundColor: themeColors.accent }, isLoading && styles.buttonDisabled]}
             onPress={handleSignIn}
             disabled={isLoading}
             activeOpacity={0.8}
@@ -161,9 +165,9 @@ export default function SignInScreen({ navigation }: Props) {
 
         {/* Sign Up Link */}
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Don't have an account?</Text>
+          <Text style={[styles.footerText, { color: themeColors.textMuted }]}>Don't have an account?</Text>
           <TouchableOpacity onPress={() => navigation.navigate('SignUp')}>
-            <Text style={styles.footerLink}> Sign up</Text>
+            <Text style={[styles.footerLink, { color: themeColors.accent }]}> Sign up</Text>
           </TouchableOpacity>
         </View>
         </View>

@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 import { formatCurrency, formatRelativeTime } from '../../utils/formatters';
 import { lightTap, successFeedback, errorFeedback } from '../../utils/haptics';
@@ -51,6 +52,7 @@ type FilterType = 'all' | 'pending' | 'paid' | 'refunded';
 export default function AdminSalesScreen() {
   const insets = useSafeAreaInsets();
   const { profile } = useAuth();
+  const { colors: themeColors, isDark } = useTheme();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterType>('all');
@@ -144,13 +146,21 @@ export default function AdminSalesScreen() {
 
   const FilterButton = ({ type, label }: { type: FilterType; label: string }) => (
     <TouchableOpacity
-      style={[styles.filterButton, filter === type && styles.filterButtonActive]}
+      style={[
+        styles.filterButton,
+        { backgroundColor: themeColors.surface },
+        filter === type && { backgroundColor: themeColors.accent }
+      ]}
       onPress={() => {
         lightTap();
         setFilter(type);
       }}
     >
-      <Text style={[styles.filterButtonText, filter === type && styles.filterButtonTextActive]}>
+      <Text style={[
+        styles.filterButtonText,
+        { color: themeColors.textSecondary },
+        filter === type && { color: colors.white }
+      ]}>
         {label}
       </Text>
     </TouchableOpacity>
@@ -167,11 +177,11 @@ export default function AdminSalesScreen() {
   }, { revenue: 0, platformFees: 0, sellerPayouts: 0 });
 
   const renderInvoice = ({ item }: { item: Invoice }) => (
-    <View style={styles.invoiceCard}>
+    <View style={[styles.invoiceCard, { backgroundColor: themeColors.surface }]}>
       <View style={styles.invoiceHeader}>
         <View>
-          <Text style={styles.invoiceNumber}>#{item.invoice_number}</Text>
-          <Text style={styles.listingTitle} numberOfLines={1}>
+          <Text style={[styles.invoiceNumber, { color: themeColors.textPrimary }]}>#{item.invoice_number}</Text>
+          <Text style={[styles.listingTitle, { color: themeColors.textMuted }]} numberOfLines={1}>
             {item.listing?.title || 'Unknown Listing'}
           </Text>
         </View>
@@ -180,46 +190,46 @@ export default function AdminSalesScreen() {
         </View>
       </View>
 
-      <View style={styles.partiesRow}>
+      <View style={[styles.partiesRow, { borderTopColor: themeColors.border }]}>
         <View style={styles.partyInfo}>
-          <Text style={styles.partyLabel}>Buyer</Text>
-          <Text style={styles.partyName}>
+          <Text style={[styles.partyLabel, { color: themeColors.textMuted }]}>Buyer</Text>
+          <Text style={[styles.partyName, { color: themeColors.textPrimary }]}>
             {item.buyer?.company_name || item.buyer?.full_name || 'Unknown'}
           </Text>
         </View>
-        <Feather name="arrow-right" size={16} color={colors.textLight} />
+        <Feather name="arrow-right" size={16} color={themeColors.textMuted} />
         <View style={[styles.partyInfo, styles.partyInfoRight]}>
-          <Text style={styles.partyLabel}>Seller</Text>
-          <Text style={styles.partyName}>
+          <Text style={[styles.partyLabel, { color: themeColors.textMuted }]}>Seller</Text>
+          <Text style={[styles.partyName, { color: themeColors.textPrimary }]}>
             {item.seller?.company_name || item.seller?.full_name || 'Unknown'}
           </Text>
         </View>
       </View>
 
-      <View style={styles.amountsRow}>
+      <View style={[styles.amountsRow, { borderTopColor: themeColors.border }]}>
         <View style={styles.amountItem}>
-          <Text style={styles.amountLabel}>Total</Text>
-          <Text style={styles.amountValue}>{formatCurrency(item.total_amount)}</Text>
+          <Text style={[styles.amountLabel, { color: themeColors.textMuted }]}>Total</Text>
+          <Text style={[styles.amountValue, { color: themeColors.accent }]}>{formatCurrency(item.total_amount)}</Text>
         </View>
         <View style={styles.amountItem}>
-          <Text style={styles.amountLabel}>Platform Fee</Text>
-          <Text style={styles.amountValueSmall}>{formatCurrency(item.platform_fee || 0)}</Text>
+          <Text style={[styles.amountLabel, { color: themeColors.textMuted }]}>Platform Fee</Text>
+          <Text style={[styles.amountValueSmall, { color: themeColors.textPrimary }]}>{formatCurrency(item.platform_fee || 0)}</Text>
         </View>
         <View style={styles.amountItem}>
-          <Text style={styles.amountLabel}>Seller Payout</Text>
-          <Text style={styles.amountValueSmall}>{formatCurrency(item.seller_payout_amount || 0)}</Text>
+          <Text style={[styles.amountLabel, { color: themeColors.textMuted }]}>Seller Payout</Text>
+          <Text style={[styles.amountValueSmall, { color: themeColors.textPrimary }]}>{formatCurrency(item.seller_payout_amount || 0)}</Text>
         </View>
       </View>
 
       <View style={styles.dateRow}>
-        <Text style={styles.dateText}>Created {formatRelativeTime(item.created_at)}</Text>
+        <Text style={[styles.dateText, { color: themeColors.textMuted }]}>Created {formatRelativeTime(item.created_at)}</Text>
         {item.paid_at && (
-          <Text style={styles.dateText}>Paid {formatRelativeTime(item.paid_at)}</Text>
+          <Text style={[styles.dateText, { color: themeColors.textMuted }]}>Paid {formatRelativeTime(item.paid_at)}</Text>
         )}
       </View>
 
       {/* Actions */}
-      <View style={styles.actionRow}>
+      <View style={[styles.actionRow, { borderTopColor: themeColors.border }]}>
         {item.status === 'pending' && (
           <>
             <TouchableOpacity
@@ -253,17 +263,17 @@ export default function AdminSalesScreen() {
 
   if (!profile?.is_admin) {
     return (
-      <View style={styles.unauthorizedContainer}>
+      <View style={[styles.unauthorizedContainer, { backgroundColor: themeColors.background }]}>
         <Feather name="shield-off" size={48} color={colors.error} />
-        <Text style={styles.unauthorizedText}>Access Denied</Text>
+        <Text style={[styles.unauthorizedText, { color: themeColors.textMuted }]}>Access Denied</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* Summary Card */}
-      <View style={styles.summaryCard}>
+      <View style={[styles.summaryCard, { backgroundColor: themeColors.accent }]}>
         <View style={styles.summaryItem}>
           <Text style={styles.summaryValue}>{formatCurrency(totals?.revenue || 0)}</Text>
           <Text style={styles.summaryLabel}>Total Revenue</Text>
@@ -281,26 +291,26 @@ export default function AdminSalesScreen() {
       </View>
 
       {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchInputContainer}>
-          <Feather name="search" size={20} color={colors.textMuted} />
+      <View style={[styles.searchContainer, { backgroundColor: themeColors.surface }]}>
+        <View style={[styles.searchInputContainer, { backgroundColor: themeColors.inputBackground }]}>
+          <Feather name="search" size={20} color={themeColors.textMuted} />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: themeColors.textPrimary }]}
             placeholder="Search invoices..."
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={themeColors.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Feather name="x" size={20} color={colors.textMuted} />
+              <Feather name="x" size={20} color={themeColors.textMuted} />
             </TouchableOpacity>
           )}
         </View>
       </View>
 
       {/* Filters */}
-      <View style={styles.filterRow}>
+      <View style={[styles.filterRow, { backgroundColor: themeColors.surface, borderBottomColor: themeColors.border }]}>
         <FilterButton type="all" label="All" />
         <FilterButton type="pending" label="Pending" />
         <FilterButton type="paid" label="Paid" />
@@ -310,7 +320,7 @@ export default function AdminSalesScreen() {
       {/* Invoice List */}
       {isLoading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.accent} />
+          <ActivityIndicator size="large" color={themeColors.accent} />
         </View>
       ) : (
         <FlatList
@@ -319,13 +329,13 @@ export default function AdminSalesScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + spacing.xl }]}
           refreshControl={
-            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.accent} />
+            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={themeColors.accent} />
           }
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Feather name="file-text" size={48} color={colors.textLight} />
-              <Text style={styles.emptyTitle}>No Invoices Found</Text>
-              <Text style={styles.emptyText}>
+              <Feather name="file-text" size={48} color={themeColors.textMuted} />
+              <Text style={[styles.emptyTitle, { color: themeColors.textPrimary }]}>No Invoices Found</Text>
+              <Text style={[styles.emptyText, { color: themeColors.textMuted }]}>
                 {searchQuery ? 'Try a different search term' : 'No invoices match the current filter'}
               </Text>
             </View>

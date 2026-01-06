@@ -15,6 +15,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { Invoice, Listing, ListingImage, Profile } from '../../types/database';
 import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 import { formatCurrency, formatDate, formatRelativeTime } from '../../utils/formatters';
@@ -50,6 +51,7 @@ export default function MyInvoicesScreen() {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { colors: themeColors, isDark } = useTheme();
   const [filter, setFilter] = useState<FilterType>('all');
 
   const { data: invoices, isLoading, refetch } = useQuery<InvoiceWithDetails[]>({
@@ -164,7 +166,7 @@ export default function MyInvoicesScreen() {
 
     return (
       <TouchableOpacity
-        style={styles.invoiceCard}
+        style={[styles.invoiceCard, { backgroundColor: themeColors.surface }]}
         onPress={() => handleInvoicePress(item)}
         activeOpacity={0.7}
       >
@@ -182,26 +184,26 @@ export default function MyInvoicesScreen() {
             <Image source={primaryImage.url} style={styles.listingImage} contentFit="cover" />
           ) : (
             <View style={styles.imagePlaceholder}>
-              <Feather name="package" size={24} color={colors.textLight} />
+              <Feather name="package" size={24} color={themeColors.textMuted} />
             </View>
           )}
 
           {/* Details */}
           <View style={styles.invoiceDetails}>
-            <Text style={styles.invoiceNumber}>#{item.invoice_number}</Text>
-            <Text style={styles.listingTitle} numberOfLines={2}>
+            <Text style={[styles.invoiceNumber, { color: themeColors.textMuted }]}>#{item.invoice_number}</Text>
+            <Text style={[styles.listingTitle, { color: themeColors.textPrimary }]} numberOfLines={2}>
               {item.listing?.title || 'Item'}
             </Text>
 
             <View style={styles.priceRow}>
-              <Text style={styles.totalLabel}>Total:</Text>
-              <Text style={styles.totalAmount}>{formatCurrency(item.total_amount)}</Text>
+              <Text style={[styles.totalLabel, { color: themeColors.textMuted }]}>Total:</Text>
+              <Text style={[styles.totalAmount, { color: themeColors.textPrimary }]}>{formatCurrency(item.total_amount)}</Text>
             </View>
 
             {item.seller && (
               <View style={styles.sellerRow}>
-                <Feather name="user" size={12} color={colors.textMuted} />
-                <Text style={styles.sellerName}>
+                <Feather name="user" size={12} color={themeColors.textMuted} />
+                <Text style={[styles.sellerName, { color: themeColors.textMuted }]}>
                   {item.seller.company_name || item.seller.full_name}
                 </Text>
               </View>
@@ -213,7 +215,7 @@ export default function MyInvoicesScreen() {
                   {paymentStatus.label}
                 </Text>
               </View>
-              <Text style={styles.dateText}>
+              <Text style={[styles.dateText, { color: themeColors.textMuted }]}>
                 {item.status === 'pending'
                   ? `Due: ${formatDate(item.payment_due_date)}`
                   : formatRelativeTime(item.created_at)}
@@ -255,9 +257,9 @@ export default function MyInvoicesScreen() {
 
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
-      <Feather name="shopping-bag" size={48} color={colors.textLight} />
-      <Text style={styles.emptyTitle}>No purchases yet</Text>
-      <Text style={styles.emptyText}>
+      <Feather name="shopping-bag" size={48} color={themeColors.textMuted} />
+      <Text style={[styles.emptyTitle, { color: themeColors.textPrimary }]}>No purchases yet</Text>
+      <Text style={[styles.emptyText, { color: themeColors.textMuted }]}>
         {filter === 'all'
           ? "When you win auctions or have accepted offers, your invoices will appear here."
           : `No ${filter} purchases found.`}
@@ -280,7 +282,7 @@ export default function MyInvoicesScreen() {
     .reduce((sum, i) => sum + i.total_amount, 0) || 0;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* Summary Card */}
       {pendingCount > 0 && (
         <View style={styles.summaryCard}>
@@ -295,7 +297,7 @@ export default function MyInvoicesScreen() {
       )}
 
       {/* Filter Bar */}
-      <View style={styles.filterContainer}>
+      <View style={[styles.filterContainer, { backgroundColor: themeColors.surface, borderBottomColor: themeColors.border }]}>
         <FlatList
           horizontal
           data={FILTERS}
@@ -305,6 +307,7 @@ export default function MyInvoicesScreen() {
             <TouchableOpacity
               style={[
                 styles.filterChip,
+                { backgroundColor: filter === item.key ? colors.accent : themeColors.surface },
                 filter === item.key && styles.filterChipActive,
               ]}
               onPress={() => {
@@ -315,6 +318,7 @@ export default function MyInvoicesScreen() {
               <Text
                 style={[
                   styles.filterText,
+                  { color: filter === item.key ? colors.white : themeColors.textMuted },
                   filter === item.key && styles.filterTextActive,
                 ]}
               >
@@ -329,7 +333,7 @@ export default function MyInvoicesScreen() {
       {/* Invoices List */}
       {isLoading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.accent} />
+          <ActivityIndicator size="large" color={themeColors.accent} />
         </View>
       ) : (
         <FlatList
@@ -345,7 +349,7 @@ export default function MyInvoicesScreen() {
             <RefreshControl
               refreshing={isLoading}
               onRefresh={refetch}
-              tintColor={colors.accent}
+              tintColor={themeColors.accent}
             />
           }
           ListEmptyComponent={renderEmptyState}

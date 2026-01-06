@@ -145,15 +145,45 @@ export default function NotificationsScreen() {
       markReadMutation.mutate(notification.id);
     }
 
-    // Navigate based on notification type
-    if (notification.listing_id) {
-      navigation.navigate('ListingDetail' as never, { listingId: notification.listing_id } as never);
+    // Navigate based on notification type - check specific types first, then fall back to IDs
+    const offerTypes: NotificationType[] = ['new_offer', 'offer_accepted', 'offer_declined', 'offer_countered', 'offer_expired', 'offer_withdrawn', 'offer_response_needed'];
+    const bidTypes: NotificationType[] = ['outbid', 'auction_won', 'new_bid', 'auction_ending_soon', 'auction_ending'];
+    const invoiceTypes: NotificationType[] = ['payment_reminder', 'payment_received', 'payment_confirmed', 'item_shipped', 'item_delivered'];
+
+    if (offerTypes.includes(notification.type)) {
+      // For offer_accepted with invoice_id, go directly to invoice for payment
+      if (notification.type === 'offer_accepted' && notification.invoice_id) {
+        navigation.navigate('InvoiceDetail' as never, { invoiceId: notification.invoice_id } as never);
+        return;
+      }
+
+      // For other offer notifications, determine the appropriate view and filter
+      // new_offer = seller received a new offer → go to "Offers Received"
+      // offer_countered = other party countered your offer → go to "Offers Sent" for buyer, "Offers Received" for seller
+      // offer_declined/withdrawn/expired = response to your offer → go to appropriate tab
+      const sellerReceivedTypes: NotificationType[] = ['new_offer'];
+      const isSellerNotification = sellerReceivedTypes.includes(notification.type);
+
+      navigation.navigate('MyOffers' as never, {
+        viewMode: isSellerNotification ? 'received' : 'sent',
+        filter: notification.type === 'offer_accepted' ? 'accepted' : 'pending',
+      } as never);
+    } else if (invoiceTypes.includes(notification.type) && notification.invoice_id) {
+      navigation.navigate('InvoiceDetail' as never, { invoiceId: notification.invoice_id } as never);
+    } else if (bidTypes.includes(notification.type)) {
+      if (notification.listing_id) {
+        navigation.navigate('ListingDetail' as never, { listingId: notification.listing_id } as never);
+      } else {
+        navigation.navigate('MyBids' as never);
+      }
     } else if (notification.invoice_id) {
       navigation.navigate('InvoiceDetail' as never, { invoiceId: notification.invoice_id } as never);
     } else if (notification.offer_id) {
       navigation.navigate('MyOffers' as never);
     } else if (notification.bid_id) {
       navigation.navigate('MyBids' as never);
+    } else if (notification.listing_id) {
+      navigation.navigate('ListingDetail' as never, { listingId: notification.listing_id } as never);
     }
   }, [navigation, markReadMutation]);
 

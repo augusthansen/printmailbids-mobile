@@ -49,6 +49,10 @@ interface ListingFormData {
   accept_offers: boolean;
   auto_accept_price: string;
   auto_decline_price: string;
+  // Timing
+  auction_duration_days: string;
+  schedule_start: 'now' | 'scheduled';
+  scheduled_start_days: string;
   make: string;
   model: string;
   year: string;
@@ -79,10 +83,9 @@ interface ListingFormData {
 }
 
 const LISTING_TYPES: { key: ListingType; label: string; description: string }[] = [
-  { key: 'auction', label: 'Auction', description: 'Bidding only' },
-  { key: 'auction_buy_now', label: 'Auction + Buy Now', description: 'Bidding with instant purchase option' },
-  { key: 'fixed_price', label: 'Fixed Price', description: 'Set price, no offers' },
-  { key: 'fixed_price_offers', label: 'Fixed Price + Offers', description: 'Set price with make offer option' },
+  { key: 'auction', label: 'Auction', description: 'Competitive bidding with reserve option' },
+  { key: 'make_offer', label: 'Make An Offer', description: 'Accept offers from buyers' },
+  { key: 'auction_with_offers', label: 'Auction & Make An Offer', description: 'Bidding plus direct offers' },
 ];
 
 const EQUIPMENT_STATUSES: { key: EquipmentStatus; label: string }[] = [
@@ -118,6 +121,16 @@ const ASSISTANCE_OPTIONS: { key: OnsiteAssistance; label: string }[] = [
   { key: 'no_assistance', label: 'No On-site Assistance' },
 ];
 
+const AUCTION_DURATIONS: { key: string; label: string; days: number }[] = [
+  { key: '3', label: '3 Days', days: 3 },
+  { key: '5', label: '5 Days', days: 5 },
+  { key: '7', label: '7 Days', days: 7 },
+  { key: '10', label: '10 Days', days: 10 },
+  { key: '14', label: '14 Days', days: 14 },
+  { key: '21', label: '21 Days', days: 21 },
+  { key: '30', label: '30 Days', days: 30 },
+];
+
 export default function EditListingScreen({ route, navigation }: Props) {
   const { listingId } = route.params;
   const insets = useSafeAreaInsets();
@@ -140,6 +153,9 @@ export default function EditListingScreen({ route, navigation }: Props) {
     accept_offers: false,
     auto_accept_price: '',
     auto_decline_price: '',
+    auction_duration_days: '7',
+    schedule_start: 'now',
+    scheduled_start_days: '1',
     make: '',
     model: '',
     year: '',
@@ -279,15 +295,18 @@ export default function EditListingScreen({ route, navigation }: Props) {
     mediumTap();
 
     try {
-      const updateData: Partial<Listing> = {
+      const hasAuction = formData.listing_type === 'auction' || formData.listing_type === 'auction_with_offers';
+      const isEnded = listing?.status === 'ended' || listing?.status === 'expired' ||
+        (listing?.end_time && new Date(listing.end_time) < new Date());
+
+      // Only include fields that exist in the actual database schema
+      // Many fields in the TypeScript types don't exist in the DB yet
+      const updateData: Record<string, unknown> = {
         title: formData.title.trim(),
         description: formData.description.trim() || null,
-        seller_terms: formData.seller_terms.trim() || null,
         listing_type: formData.listing_type,
         starting_price: formData.starting_price ? parseFloat(formData.starting_price) : null,
         reserve_price: formData.reserve_price ? parseFloat(formData.reserve_price) : null,
-        buy_now_price: formData.buy_now_price ? parseFloat(formData.buy_now_price) : null,
-        fixed_price: formData.fixed_price ? parseFloat(formData.fixed_price) : null,
         accept_offers: formData.accept_offers,
         auto_accept_price: formData.auto_accept_price ? parseFloat(formData.auto_accept_price) : null,
         auto_decline_price: formData.auto_decline_price ? parseFloat(formData.auto_decline_price) : null,
@@ -296,29 +315,38 @@ export default function EditListingScreen({ route, navigation }: Props) {
         year: formData.year ? parseInt(formData.year) : null,
         serial_number: formData.serial_number.trim() || null,
         condition: formData.condition || null,
-        hours_count: formData.hours_count ? parseInt(formData.hours_count) : null,
-        equipment_status: formData.equipment_status || null,
-        weight_lbs: formData.weight_lbs ? parseFloat(formData.weight_lbs) : null,
-        length_inches: formData.length_inches ? parseFloat(formData.length_inches) : null,
-        width_inches: formData.width_inches ? parseFloat(formData.width_inches) : null,
-        height_inches: formData.height_inches ? parseFloat(formData.height_inches) : null,
-        floor_length_ft: formData.floor_length_ft ? parseFloat(formData.floor_length_ft) : null,
-        floor_width_ft: formData.floor_width_ft ? parseFloat(formData.floor_width_ft) : null,
-        electrical_requirements: formData.electrical_requirements.trim() || null,
-        air_requirements_psi: formData.air_requirements_psi ? parseFloat(formData.air_requirements_psi) : null,
-        deinstall_responsibility: formData.deinstall_responsibility,
-        deinstall_fee: formData.deinstall_fee ? parseFloat(formData.deinstall_fee) : null,
-        onsite_assistance: formData.onsite_assistance,
-        location_id: formData.location_id || null,
-        pickup_hours: formData.pickup_hours.trim() || null,
-        pickup_notes: formData.pickup_notes.trim() || null,
-        payment_due_days: parseInt(formData.payment_due_days) || 7,
-        accepts_credit_card: formData.accepts_credit_card,
-        accepts_ach: formData.accepts_ach,
-        accepts_wire: formData.accepts_wire,
-        accepts_check: formData.accepts_check,
         updated_at: new Date().toISOString(),
       };
+
+      // Handle relisting / timing changes for auction listings
+      if (hasAuction) {
+        const durationDays = parseInt(formData.auction_duration_days) || 7;
+        let startDate = new Date();
+
+        if (formData.schedule_start === 'scheduled') {
+          // Schedule for later
+          const scheduledDays = parseInt(formData.scheduled_start_days) || 1;
+          startDate.setDate(startDate.getDate() + scheduledDays);
+          updateData.status = 'scheduled';
+        } else {
+          // Start immediately
+          updateData.status = 'active';
+        }
+
+        // Calculate end date
+        const endDate = new Date(startDate);
+        endDate.setDate(endDate.getDate() + durationDays);
+
+        updateData.start_time = startDate.toISOString();
+        updateData.end_time = endDate.toISOString();
+
+        // Reset bid-related fields when relisting
+        if (isEnded) {
+          updateData.current_price = null;
+          updateData.bid_count = 0;
+          updateData.winning_bid_id = null;
+        }
+      }
 
       const { error } = await supabase
         .from('listings')
@@ -331,8 +359,16 @@ export default function EditListingScreen({ route, navigation }: Props) {
       queryClient.invalidateQueries({ queryKey: ['myListings'] });
       queryClient.invalidateQueries({ queryKey: ['listing', listingId] });
       queryClient.invalidateQueries({ queryKey: ['editListing', listingId] });
+      queryClient.invalidateQueries({ queryKey: ['activeListings'] });
+      queryClient.invalidateQueries({ queryKey: ['endingSoonListings'] });
 
-      Alert.alert('Success', 'Listing updated successfully', [
+      const successMessage = isEnded && hasAuction
+        ? formData.schedule_start === 'scheduled'
+          ? 'Listing scheduled for relisting!'
+          : 'Listing relisted successfully!'
+        : 'Listing updated successfully';
+
+      Alert.alert('Success', successMessage, [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
     } catch (error) {
@@ -510,14 +546,12 @@ export default function EditListingScreen({ route, navigation }: Props) {
   );
 
   const renderPricingSection = () => {
-    const isAuction = formData.listing_type === 'auction' || formData.listing_type === 'auction_buy_now';
-    const isFixedPrice = formData.listing_type === 'fixed_price' || formData.listing_type === 'fixed_price_offers';
-    const hasBuyNow = formData.listing_type === 'auction_buy_now';
-    const hasOffers = formData.listing_type === 'fixed_price_offers';
+    const hasAuction = formData.listing_type === 'auction' || formData.listing_type === 'auction_with_offers';
+    const hasOffers = formData.listing_type === 'make_offer' || formData.listing_type === 'auction_with_offers';
 
     return (
       <View style={styles.sectionContent}>
-        {isAuction && (
+        {hasAuction && (
           <>
             <View style={styles.inputGroup}>
               <Text style={[styles.label, { color: themeColors.textPrimary }]}>Starting Price *</Text>
@@ -554,29 +588,12 @@ export default function EditListingScreen({ route, navigation }: Props) {
           </>
         )}
 
-        {hasBuyNow && (
+        {formData.listing_type === 'make_offer' && (
           <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: themeColors.textPrimary }]}>Buy Now Price</Text>
+            <Text style={[styles.label, { color: themeColors.textPrimary }]}>Asking Price (Optional)</Text>
             <Text style={[styles.hint, { color: themeColors.textMuted }]}>
-              Allow buyers to purchase immediately at this price.
+              Set an asking price to guide buyers. Leave blank to accept any offer.
             </Text>
-            <View style={styles.currencyInput}>
-              <Text style={[styles.currencySymbol, { color: themeColors.textMuted }]}>$</Text>
-              <TextInput
-                style={[styles.input, styles.currencyField, { backgroundColor: isDark ? themeColors.sand : '#ffffff', color: themeColors.textPrimary, borderColor: themeColors.border }]}
-                value={formData.buy_now_price}
-                onChangeText={(v) => updateField('buy_now_price', v.replace(/[^0-9.]/g, ''))}
-                placeholder="0.00"
-                placeholderTextColor={themeColors.textLight}
-                keyboardType="decimal-pad"
-              />
-            </View>
-          </View>
-        )}
-
-        {isFixedPrice && (
-          <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: themeColors.textPrimary }]}>Price *</Text>
             <View style={styles.currencyInput}>
               <Text style={[styles.currencySymbol, { color: themeColors.textMuted }]}>$</Text>
               <TextInput
@@ -593,60 +610,41 @@ export default function EditListingScreen({ route, navigation }: Props) {
 
         {hasOffers && (
           <>
-            <View style={[styles.toggleRow, { borderBottomColor: themeColors.borderLight }]}>
-              <View style={styles.toggleContent}>
-                <Text style={[styles.toggleLabel, { color: themeColors.textPrimary }]}>Accept Offers</Text>
-                <Text style={[styles.toggleHint, { color: themeColors.textMuted }]}>
-                  Allow buyers to submit offers below asking price
-                </Text>
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: themeColors.textPrimary }]}>Auto-Accept Above (Optional)</Text>
+              <Text style={[styles.hint, { color: themeColors.textMuted }]}>
+                Automatically accept offers at or above this amount
+              </Text>
+              <View style={styles.currencyInput}>
+                <Text style={[styles.currencySymbol, { color: themeColors.textMuted }]}>$</Text>
+                <TextInput
+                  style={[styles.input, styles.currencyField, { backgroundColor: isDark ? themeColors.sand : '#ffffff', color: themeColors.textPrimary, borderColor: themeColors.border }]}
+                  value={formData.auto_accept_price}
+                  onChangeText={(v) => updateField('auto_accept_price', v.replace(/[^0-9.]/g, ''))}
+                  placeholder="0.00"
+                  placeholderTextColor={themeColors.textLight}
+                  keyboardType="decimal-pad"
+                />
               </View>
-              <Switch
-                value={formData.accept_offers}
-                onValueChange={(v) => updateField('accept_offers', v)}
-                trackColor={{ false: themeColors.border, true: themeColors.accent }}
-                thumbColor="#ffffff"
-              />
             </View>
 
-            {formData.accept_offers && (
-              <>
-                <View style={styles.inputGroup}>
-                  <Text style={[styles.label, { color: themeColors.textPrimary }]}>Auto-Accept Above (Optional)</Text>
-                  <Text style={[styles.hint, { color: themeColors.textMuted }]}>
-                    Automatically accept offers at or above this amount
-                  </Text>
-                  <View style={styles.currencyInput}>
-                    <Text style={[styles.currencySymbol, { color: themeColors.textMuted }]}>$</Text>
-                    <TextInput
-                      style={[styles.input, styles.currencyField, { backgroundColor: isDark ? themeColors.sand : '#ffffff', color: themeColors.textPrimary, borderColor: themeColors.border }]}
-                      value={formData.auto_accept_price}
-                      onChangeText={(v) => updateField('auto_accept_price', v.replace(/[^0-9.]/g, ''))}
-                      placeholder="0.00"
-                      placeholderTextColor={themeColors.textLight}
-                      keyboardType="decimal-pad"
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={[styles.label, { color: themeColors.textPrimary }]}>Auto-Decline Below (Optional)</Text>
-                  <Text style={[styles.hint, { color: themeColors.textMuted }]}>
-                    Automatically decline offers below this amount
-                  </Text>
-                  <View style={styles.currencyInput}>
-                    <Text style={[styles.currencySymbol, { color: themeColors.textMuted }]}>$</Text>
-                    <TextInput
-                      style={[styles.input, styles.currencyField, { backgroundColor: isDark ? themeColors.sand : '#ffffff', color: themeColors.textPrimary, borderColor: themeColors.border }]}
-                      value={formData.auto_decline_price}
-                      onChangeText={(v) => updateField('auto_decline_price', v.replace(/[^0-9.]/g, ''))}
-                      placeholder="0.00"
-                      placeholderTextColor={themeColors.textLight}
-                      keyboardType="decimal-pad"
-                    />
-                  </View>
-                </View>
-              </>
-            )}
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: themeColors.textPrimary }]}>Auto-Decline Below (Optional)</Text>
+              <Text style={[styles.hint, { color: themeColors.textMuted }]}>
+                Automatically decline offers below this amount
+              </Text>
+              <View style={styles.currencyInput}>
+                <Text style={[styles.currencySymbol, { color: themeColors.textMuted }]}>$</Text>
+                <TextInput
+                  style={[styles.input, styles.currencyField, { backgroundColor: isDark ? themeColors.sand : '#ffffff', color: themeColors.textPrimary, borderColor: themeColors.border }]}
+                  value={formData.auto_decline_price}
+                  onChangeText={(v) => updateField('auto_decline_price', v.replace(/[^0-9.]/g, ''))}
+                  placeholder="0.00"
+                  placeholderTextColor={themeColors.textLight}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+            </View>
           </>
         )}
 
@@ -656,6 +654,220 @@ export default function EditListingScreen({ route, navigation }: Props) {
             An 8% buyer premium will be added to the final sale price.
           </Text>
         </View>
+      </View>
+    );
+  };
+
+  const renderTimingSection = () => {
+    const hasAuction = formData.listing_type === 'auction' || formData.listing_type === 'auction_with_offers';
+    const isEnded = listing?.status === 'ended' || listing?.status === 'expired' ||
+      (listing?.end_time && new Date(listing.end_time) < new Date());
+    const isActive = listing?.status === 'active';
+
+    // Calculate what the end date would be with current settings
+    const getPreviewEndDate = () => {
+      const durationDays = parseInt(formData.auction_duration_days) || 7;
+      let startDate = new Date();
+
+      if (formData.schedule_start === 'scheduled') {
+        const scheduledDays = parseInt(formData.scheduled_start_days) || 1;
+        startDate.setDate(startDate.getDate() + scheduledDays);
+      }
+
+      const endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + durationDays);
+
+      return endDate.toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+    };
+
+    return (
+      <View style={styles.sectionContent}>
+        {/* Show current status for ended listings */}
+        {isEnded && (
+          <View style={[styles.statusBanner, { backgroundColor: colors.error + '15' }]}>
+            <Feather name="alert-circle" size={20} color={colors.error} />
+            <View style={styles.statusBannerContent}>
+              <Text style={[styles.statusBannerTitle, { color: colors.error }]}>
+                Auction Ended
+              </Text>
+              <Text style={[styles.statusBannerText, { color: themeColors.textMuted }]}>
+                Set new timing below to relist this item
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Show current end time for active auctions */}
+        {isActive && listing?.end_time && (
+          <View style={[styles.statusBanner, { backgroundColor: themeColors.accent + '15' }]}>
+            <Feather name="clock" size={20} color={themeColors.accent} />
+            <View style={styles.statusBannerContent}>
+              <Text style={[styles.statusBannerTitle, { color: themeColors.accent }]}>
+                Currently Active
+              </Text>
+              <Text style={[styles.statusBannerText, { color: themeColors.textMuted }]}>
+                Ends {new Date(listing.end_time).toLocaleDateString('en-US', {
+                  weekday: 'short',
+                  month: 'short',
+                  day: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {hasAuction && (
+          <>
+            {/* When to Start */}
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: themeColors.textPrimary }]}>
+                {isEnded ? 'When to Relist' : 'When to Start'}
+              </Text>
+              <View style={styles.optionsGrid}>
+                <TouchableOpacity
+                  style={[
+                    styles.optionCard,
+                    { backgroundColor: isDark ? themeColors.sand : '#ffffff', borderColor: themeColors.border },
+                    formData.schedule_start === 'now' && { borderColor: themeColors.accent, backgroundColor: themeColors.accentFaint },
+                  ]}
+                  onPress={() => {
+                    lightTap();
+                    updateField('schedule_start', 'now');
+                  }}
+                >
+                  <View style={styles.optionRow}>
+                    <Feather name="zap" size={18} color={formData.schedule_start === 'now' ? themeColors.accent : themeColors.textMuted} />
+                    <Text style={[styles.optionLabel, { color: themeColors.textPrimary, marginBottom: 0 }]}>Start Immediately</Text>
+                  </View>
+                  <Text style={[styles.optionDescription, { color: themeColors.textMuted }]}>
+                    Auction begins as soon as you save
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.optionCard,
+                    { backgroundColor: isDark ? themeColors.sand : '#ffffff', borderColor: themeColors.border },
+                    formData.schedule_start === 'scheduled' && { borderColor: themeColors.accent, backgroundColor: themeColors.accentFaint },
+                  ]}
+                  onPress={() => {
+                    lightTap();
+                    updateField('schedule_start', 'scheduled');
+                  }}
+                >
+                  <View style={styles.optionRow}>
+                    <Feather name="calendar" size={18} color={formData.schedule_start === 'scheduled' ? themeColors.accent : themeColors.textMuted} />
+                    <Text style={[styles.optionLabel, { color: themeColors.textPrimary, marginBottom: 0 }]}>Schedule for Later</Text>
+                  </View>
+                  <Text style={[styles.optionDescription, { color: themeColors.textMuted }]}>
+                    Set when the auction should begin
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Schedule delay (if scheduled) */}
+            {formData.schedule_start === 'scheduled' && (
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: themeColors.textPrimary }]}>Start In</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
+                  {[
+                    { key: '1', label: '1 Day' },
+                    { key: '2', label: '2 Days' },
+                    { key: '3', label: '3 Days' },
+                    { key: '5', label: '5 Days' },
+                    { key: '7', label: '1 Week' },
+                  ].map((option) => (
+                    <TouchableOpacity
+                      key={option.key}
+                      style={[
+                        styles.chip,
+                        { backgroundColor: isDark ? themeColors.sand : '#ffffff', borderColor: themeColors.border },
+                        formData.scheduled_start_days === option.key && { borderColor: themeColors.accent, backgroundColor: themeColors.accentFaint },
+                      ]}
+                      onPress={() => {
+                        lightTap();
+                        updateField('scheduled_start_days', option.key);
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.chipText,
+                          { color: formData.scheduled_start_days === option.key ? themeColors.accent : themeColors.textSecondary },
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
+            {/* Auction Duration */}
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: themeColors.textPrimary }]}>Auction Duration</Text>
+              <Text style={[styles.hint, { color: themeColors.textMuted }]}>
+                How long the auction will run once started
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
+                {AUCTION_DURATIONS.map((duration) => (
+                  <TouchableOpacity
+                    key={duration.key}
+                    style={[
+                      styles.chip,
+                      { backgroundColor: isDark ? themeColors.sand : '#ffffff', borderColor: themeColors.border },
+                      formData.auction_duration_days === duration.key && { borderColor: themeColors.accent, backgroundColor: themeColors.accentFaint },
+                    ]}
+                    onPress={() => {
+                      lightTap();
+                      updateField('auction_duration_days', duration.key);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        { color: formData.auction_duration_days === duration.key ? themeColors.accent : themeColors.textSecondary },
+                      ]}
+                    >
+                      {duration.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            {/* Preview of end date */}
+            <View style={[styles.previewCard, { backgroundColor: themeColors.sand }]}>
+              <Feather name="calendar" size={18} color={themeColors.textMuted} />
+              <View style={styles.previewContent}>
+                <Text style={[styles.previewLabel, { color: themeColors.textMuted }]}>
+                  {isEnded ? 'New auction will end' : 'Auction will end'}
+                </Text>
+                <Text style={[styles.previewValue, { color: themeColors.textPrimary }]}>
+                  {getPreviewEndDate()}
+                </Text>
+              </View>
+            </View>
+          </>
+        )}
+
+        {!hasAuction && (
+          <View style={[styles.infoCard, { backgroundColor: themeColors.sand }]}>
+            <Feather name="info" size={16} color={themeColors.textMuted} />
+            <Text style={[styles.infoText, { color: themeColors.textMuted }]}>
+              Timing settings are only applicable for auction listings. Your "Make An Offer" listing will remain active until you manually end it or accept an offer.
+            </Text>
+          </View>
+        )}
       </View>
     );
   };
@@ -1129,6 +1341,7 @@ export default function EditListingScreen({ route, navigation }: Props) {
       >
         {renderSectionTab('basic', 'Basic', 'file-text')}
         {renderSectionTab('pricing', 'Pricing', 'dollar-sign')}
+        {renderSectionTab('timing', 'Timing', 'clock')}
         {renderSectionTab('equipment', 'Equipment', 'tool')}
         {renderSectionTab('logistics', 'Logistics', 'truck')}
         {renderSectionTab('images', 'Images', 'image')}
@@ -1137,12 +1350,13 @@ export default function EditListingScreen({ route, navigation }: Props) {
 
       {/* Form Content */}
       <ScrollView
-        style={styles.scrollView}
+        style={[styles.scrollView, { backgroundColor: themeColors.background }]}
         contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
         showsVerticalScrollIndicator={false}
       >
         {activeSection === 'basic' && renderBasicSection()}
         {activeSection === 'pricing' && renderPricingSection()}
+        {activeSection === 'timing' && renderTimingSection()}
         {activeSection === 'equipment' && renderEquipmentSection()}
         {activeSection === 'logistics' && renderLogisticsSection()}
         {activeSection === 'images' && renderImagesSection()}
@@ -1151,20 +1365,33 @@ export default function EditListingScreen({ route, navigation }: Props) {
 
       {/* Save Button */}
       <View style={[styles.footer, { backgroundColor: isDark ? themeColors.sand : '#ffffff', paddingBottom: insets.bottom + spacing.md, borderTopColor: themeColors.borderLight }]}>
-        <TouchableOpacity
-          style={[styles.saveButton, { backgroundColor: themeColors.accent }]}
-          onPress={handleSave}
-          disabled={isSaving}
-        >
-          {isSaving ? (
-            <ActivityIndicator size="small" color="#ffffff" />
-          ) : (
-            <>
-              <Feather name="check" size={20} color="#ffffff" />
-              <Text style={styles.saveButtonText}>Save Changes</Text>
-            </>
-          )}
-        </TouchableOpacity>
+        {(() => {
+          const hasAuction = formData.listing_type === 'auction' || formData.listing_type === 'auction_with_offers';
+          const isEnded = listing?.status === 'ended' || listing?.status === 'expired' ||
+            (listing?.end_time && new Date(listing.end_time) < new Date());
+          const isRelist = isEnded && hasAuction;
+          const buttonText = isRelist
+            ? formData.schedule_start === 'scheduled' ? 'Schedule Relist' : 'Relist Now'
+            : 'Save Changes';
+          const buttonIcon = isRelist ? 'refresh-cw' : 'check';
+
+          return (
+            <TouchableOpacity
+              style={[styles.saveButton, { backgroundColor: themeColors.accent }]}
+              onPress={handleSave}
+              disabled={isSaving}
+            >
+              {isSaving ? (
+                <ActivityIndicator size="small" color="#ffffff" />
+              ) : (
+                <>
+                  <Feather name={buttonIcon as keyof typeof Feather.glyphMap} size={20} color="#ffffff" />
+                  <Text style={styles.saveButtonText}>{buttonText}</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          );
+        })()}
       </View>
     </KeyboardAvoidingView>
   );
@@ -1435,6 +1662,50 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: fontSize.sm,
     lineHeight: 20,
+  },
+  statusBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: borderRadius.lg,
+    marginBottom: spacing.lg,
+  },
+  statusBannerContent: {
+    flex: 1,
+  },
+  statusBannerTitle: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.semibold,
+    marginBottom: spacing.xs,
+  },
+  statusBannerText: {
+    fontSize: fontSize.sm,
+  },
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  previewCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: borderRadius.lg,
+    marginTop: spacing.sm,
+  },
+  previewContent: {
+    flex: 1,
+  },
+  previewLabel: {
+    fontSize: fontSize.xs,
+    marginBottom: spacing.xs,
+  },
+  previewValue: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.semibold,
   },
   footer: {
     position: 'absolute',

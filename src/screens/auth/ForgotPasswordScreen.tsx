@@ -14,12 +14,14 @@ import {
 import { Feather } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../../lib/supabase';
+import { useTheme } from '../../contexts/ThemeContext';
 import { AuthStackParamList } from '../../navigation/types';
 import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'ForgotPassword'>;
 
 export default function ForgotPasswordScreen({ navigation }: Props) {
+  const { colors: themeColors, isDark } = useTheme();
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [focusedInput, setFocusedInput] = useState(false);
@@ -47,7 +49,7 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: themeColors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
@@ -59,21 +61,21 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
           {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity
-              style={styles.backButton}
+              style={[styles.backButton, { backgroundColor: themeColors.accentFaint }]}
               onPress={() => navigation.goBack()}
             >
-              <Feather name="arrow-left" size={24} color={colors.accent} />
+              <Feather name="arrow-left" size={24} color={themeColors.accent} />
             </TouchableOpacity>
             <View style={styles.logoRow}>
-              <View style={styles.logoContainer}>
+              <View style={[styles.logoContainer, { backgroundColor: themeColors.accent }]}>
                 <Text style={styles.logoText}>PMB</Text>
               </View>
               <View style={styles.titleColumn}>
                 <View style={styles.titleRow}>
-                  <Text style={styles.titlePrimary}>PrintMail</Text>
-                  <Text style={styles.titleAccent}>Bids</Text>
+                  <Text style={[styles.titlePrimary, { color: themeColors.textPrimary }]}>PrintMail</Text>
+                  <Text style={[styles.titleAccent, { color: themeColors.accent }]}>Bids</Text>
                 </View>
-                <Text style={styles.subtitle}>Reset your password</Text>
+                <Text style={[styles.subtitle, { color: themeColors.textMuted }]}>Reset your password</Text>
               </View>
             </View>
           </View>
@@ -81,16 +83,17 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
           {/* Form */}
           <View style={styles.form}>
             <View style={styles.inputContainer}>
-              <Text style={styles.label}>Email</Text>
+              <Text style={[styles.label, { color: themeColors.textPrimary }]}>Email</Text>
               <View style={[
                 styles.inputWrapper,
-                focusedInput && styles.inputWrapperFocused
+                { backgroundColor: isDark ? themeColors.sand : '#ffffff', borderColor: themeColors.border },
+                focusedInput && [styles.inputWrapperFocused, { borderColor: themeColors.accent }]
               ]}>
-                <Feather name="mail" size={18} color={colors.textMuted} style={styles.inputIcon} />
+                <Feather name="mail" size={18} color={themeColors.textMuted} style={styles.inputIcon} />
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, { color: themeColors.textPrimary }]}
                   placeholder="Enter your email"
-                  placeholderTextColor={colors.textLight}
+                  placeholderTextColor={themeColors.textMuted}
                   value={email}
                   onChangeText={setEmail}
                   autoCapitalize="none"
@@ -102,13 +105,13 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
               </View>
             </View>
 
-            <Text style={styles.infoText}>
+            <Text style={[styles.infoText, { color: themeColors.textMuted }]}>
               Enter your email address and we'll send you a link to reset your password.
             </Text>
 
             {/* Send Reset Link Button */}
             <TouchableOpacity
-              style={[styles.button, isLoading && styles.buttonDisabled]}
+              style={[styles.button, { backgroundColor: themeColors.accent }, isLoading && styles.buttonDisabled]}
               onPress={handleResetPassword}
               disabled={isLoading}
               activeOpacity={0.8}
@@ -127,7 +130,7 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
           {/* Back to Sign In Link */}
           <View style={styles.footer}>
             <TouchableOpacity onPress={() => navigation.goBack()}>
-              <Text style={styles.footerLink}>Back to Sign In</Text>
+              <Text style={[styles.footerLink, { color: themeColors.accent }]}>Back to Sign In</Text>
             </TouchableOpacity>
           </View>
         </View>

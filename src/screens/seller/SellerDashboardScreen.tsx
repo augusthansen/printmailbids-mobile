@@ -268,7 +268,7 @@ export default function SellerDashboardScreen() {
               {stats.pendingActions.offersToReview > 0 && (
                 <TouchableOpacity
                   style={styles.alertItem}
-                  onPress={() => handleNavigate('SellerOffers')}
+                  onPress={() => handleNavigate('SellerOffers', { viewMode: 'received' })}
                 >
                   <Text style={[styles.alertItemText, { color: themeColors.textPrimary }]}>
                     {stats.pendingActions.offersToReview} offer{stats.pendingActions.offersToReview !== 1 ? 's' : ''} to review
@@ -463,7 +463,7 @@ export default function SellerDashboardScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.quickAction, { backgroundColor: themeColors.warningLight }]}
-            onPress={() => handleNavigate('SellerOffers')}
+            onPress={() => handleNavigate('SellerOffers', { viewMode: 'received' })}
           >
             <Feather name="tag" size={22} color={themeColors.warning} />
             <Text style={[styles.quickActionText, { color: themeColors.warning }]}>Offers</Text>

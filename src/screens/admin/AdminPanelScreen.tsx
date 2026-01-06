@@ -14,6 +14,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 import { formatCurrency } from '../../utils/formatters';
 import { lightTap } from '../../utils/haptics';
@@ -42,6 +43,7 @@ export default function AdminPanelScreen() {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const { profile } = useAuth();
+  const { colors: themeColors, isDark } = useTheme();
 
   const { data: stats, isLoading, refetch } = useQuery<AdminStats>({
     queryKey: ['adminStats'],
@@ -75,10 +77,10 @@ export default function AdminPanelScreen() {
 
   if (!profile?.is_admin) {
     return (
-      <View style={styles.unauthorizedContainer}>
+      <View style={[styles.unauthorizedContainer, { backgroundColor: themeColors.background }]}>
         <Feather name="shield-off" size={48} color={colors.error} />
-        <Text style={styles.unauthorizedTitle}>Access Denied</Text>
-        <Text style={styles.unauthorizedText}>
+        <Text style={[styles.unauthorizedTitle, { color: themeColors.textPrimary }]}>Access Denied</Text>
+        <Text style={[styles.unauthorizedText, { color: themeColors.textMuted }]}>
           You don't have permission to access the admin panel.
         </Text>
       </View>
@@ -140,21 +142,21 @@ export default function AdminPanelScreen() {
     value: string | number;
     label: string;
   }) => (
-    <View style={styles.statCard}>
+    <View style={[styles.statCard, { backgroundColor: themeColors.surface }]}>
       <View style={[styles.statIcon, { backgroundColor: iconBg }]}>
         <Feather name={icon} size={18} color={iconColor} />
       </View>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={[styles.statValue, { color: themeColors.textPrimary }]}>{value}</Text>
+      <Text style={[styles.statLabel, { color: themeColors.textMuted }]}>{label}</Text>
     </View>
   );
 
   return (
     <ScrollView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: themeColors.background }]}
       contentContainerStyle={{ paddingBottom: insets.bottom + spacing['3xl'] }}
       refreshControl={
-        <RefreshControl refreshing={isLoading} onRefresh={refetch} tintColor={colors.accent} />
+        <RefreshControl refreshing={isLoading} onRefresh={refetch} tintColor={themeColors.accent} />
       }
     >
       {/* Header */}
@@ -163,7 +165,7 @@ export default function AdminPanelScreen() {
           <Feather name="shield" size={16} color={colors.white} />
           <Text style={styles.adminBadgeText}>Admin</Text>
         </View>
-        <Text style={styles.headerTitle}>Platform Overview</Text>
+        <Text style={[styles.headerTitle, { color: themeColors.textPrimary }]}>Platform Overview</Text>
       </View>
 
       {/* Quick Stats */}
@@ -192,7 +194,7 @@ export default function AdminPanelScreen() {
       </View>
 
       {/* Revenue Card */}
-      <View style={styles.revenueCard}>
+      <View style={[styles.revenueCard, { backgroundColor: themeColors.accent }]}>
         <View>
           <Text style={styles.revenueLabel}>Total Platform Revenue</Text>
           <Text style={styles.revenueValue}>
@@ -207,8 +209,8 @@ export default function AdminPanelScreen() {
 
       {/* Menu Items */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Admin Tools</Text>
-        <View style={styles.menuCard}>
+        <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Admin Tools</Text>
+        <View style={[styles.menuCard, { backgroundColor: themeColors.surface }]}>
           {menuItems.map((item, index) => (
             <React.Fragment key={item.screen}>
               <TouchableOpacity
@@ -218,22 +220,22 @@ export default function AdminPanelScreen() {
                   navigation.navigate(item.screen);
                 }}
               >
-                <View style={styles.menuIconContainer}>
-                  <Feather name={item.icon} size={20} color={colors.accent} />
+                <View style={[styles.menuIconContainer, { backgroundColor: themeColors.accentFaint }]}>
+                  <Feather name={item.icon} size={20} color={themeColors.accent} />
                 </View>
                 <View style={styles.menuContent}>
-                  <Text style={styles.menuTitle}>{item.title}</Text>
-                  <Text style={styles.menuSubtitle}>{item.subtitle}</Text>
+                  <Text style={[styles.menuTitle, { color: themeColors.textPrimary }]}>{item.title}</Text>
+                  <Text style={[styles.menuSubtitle, { color: themeColors.textMuted }]}>{item.subtitle}</Text>
                 </View>
                 {item.badge ? (
                   <View style={[styles.badge, item.badgeColor && { backgroundColor: item.badgeColor }]}>
                     <Text style={styles.badgeText}>{item.badge}</Text>
                   </View>
                 ) : (
-                  <Feather name="chevron-right" size={20} color={colors.textLight} />
+                  <Feather name="chevron-right" size={20} color={themeColors.textMuted} />
                 )}
               </TouchableOpacity>
-              {index < menuItems.length - 1 && <View style={styles.divider} />}
+              {index < menuItems.length - 1 && <View style={[styles.divider, { backgroundColor: themeColors.border }]} />}
             </React.Fragment>
           ))}
         </View>
@@ -241,27 +243,27 @@ export default function AdminPanelScreen() {
 
       {/* Quick Actions */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
+        <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Quick Actions</Text>
         <View style={styles.quickActionsRow}>
           <TouchableOpacity
-            style={styles.quickActionButton}
+            style={[styles.quickActionButton, { backgroundColor: themeColors.surface }]}
             onPress={() => {
               lightTap();
               navigation.navigate('AdminUsers');
             }}
           >
-            <Feather name="user-plus" size={20} color={colors.accent} />
-            <Text style={styles.quickActionText}>Add User</Text>
+            <Feather name="user-plus" size={20} color={themeColors.accent} />
+            <Text style={[styles.quickActionText, { color: themeColors.accent }]}>Add User</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.quickActionButton}
+            style={[styles.quickActionButton, { backgroundColor: themeColors.surface }]}
             onPress={() => {
               lightTap();
               navigation.navigate('AdminListings');
             }}
           >
-            <Feather name="eye" size={20} color={colors.accent} />
-            <Text style={styles.quickActionText}>Review Listings</Text>
+            <Feather name="eye" size={20} color={themeColors.accent} />
+            <Text style={[styles.quickActionText, { color: themeColors.accent }]}>Review Listings</Text>
           </TouchableOpacity>
         </View>
       </View>

@@ -16,6 +16,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { Listing, ListingImage } from '../../types/database';
 import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 import { formatCurrency, formatTimeRemaining, formatRelativeTime } from '../../utils/formatters';
@@ -40,6 +41,7 @@ export default function MyListingsScreen() {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { colors: themeColors, isDark } = useTheme();
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<FilterType>('all');
 
@@ -107,12 +109,10 @@ export default function MyListingsScreen() {
     switch (type) {
       case 'auction':
         return 'Auction';
-      case 'fixed_price':
-        return 'Fixed Price';
-      case 'fixed_price_offers':
-        return 'Make Offer';
-      case 'auction_buy_now':
-        return 'Auction + Buy Now';
+      case 'make_offer':
+        return 'Make An Offer';
+      case 'auction_with_offers':
+        return 'Auction & Offers';
       default:
         return type;
     }
@@ -148,15 +148,15 @@ export default function MyListingsScreen() {
     const primaryImage = item.images?.find(img => img.is_primary) || item.images?.[0];
     const isActive = item.status === 'active';
     const isDraft = item.status === 'draft';
-    const isAuction = item.listing_type === 'auction' || item.listing_type === 'auction_buy_now';
+    const isAuction = item.listing_type === 'auction' || item.listing_type === 'auction_with_offers';
 
     const displayPrice = isAuction
       ? item.current_bid || item.starting_price
-      : item.fixed_price || item.buy_now_price;
+      : item.fixed_price;
 
     return (
       <TouchableOpacity
-        style={styles.listingCard}
+        style={[styles.listingCard, { backgroundColor: themeColors.surface }]}
         onPress={() => handleListingPress(item)}
         activeOpacity={0.7}
       >
@@ -165,38 +165,38 @@ export default function MyListingsScreen() {
           {primaryImage?.url ? (
             <Image source={primaryImage.url} style={styles.listingImage} contentFit="cover" />
           ) : (
-            <View style={styles.imagePlaceholder}>
-              <Feather name="camera" size={24} color={colors.textLight} />
+            <View style={[styles.imagePlaceholder, { backgroundColor: themeColors.sand }]}>
+              <Feather name="camera" size={24} color={themeColors.textLight} />
             </View>
           )}
 
           {/* Details */}
           <View style={styles.listingDetails}>
-            <Text style={styles.listingTitle} numberOfLines={2}>
+            <Text style={[styles.listingTitle, { color: themeColors.textPrimary }]} numberOfLines={2}>
               {item.title}
             </Text>
 
             <View style={styles.typeRow}>
-              <Text style={styles.typeLabel}>{getListingTypeLabel(item.listing_type)}</Text>
+              <Text style={[styles.typeLabel, { color: themeColors.textMuted }]}>{getListingTypeLabel(item.listing_type)}</Text>
             </View>
 
             <View style={styles.priceRow}>
               {isAuction ? (
                 <>
-                  <Text style={styles.priceLabel}>
+                  <Text style={[styles.priceLabel, { color: themeColors.textMuted }]}>
                     {item.current_bid ? 'Current Bid:' : 'Starting:'}
                   </Text>
-                  <Text style={styles.priceAmount}>
+                  <Text style={[styles.priceAmount, { color: themeColors.textPrimary }]}>
                     {formatCurrency(displayPrice || 0)}
                   </Text>
-                  <Text style={styles.bidCount}>
+                  <Text style={[styles.bidCount, { color: themeColors.textMuted }]}>
                     ({item.bid_count} {item.bid_count === 1 ? 'bid' : 'bids'})
                   </Text>
                 </>
               ) : (
                 <>
-                  <Text style={styles.priceLabel}>Price:</Text>
-                  <Text style={styles.priceAmount}>
+                  <Text style={[styles.priceLabel, { color: themeColors.textMuted }]}>Price:</Text>
+                  <Text style={[styles.priceAmount, { color: themeColors.textPrimary }]}>
                     {formatCurrency(displayPrice || 0)}
                   </Text>
                 </>
@@ -205,17 +205,17 @@ export default function MyListingsScreen() {
 
             <View style={styles.statsRow}>
               <View style={styles.stat}>
-                <Feather name="eye" size={12} color={colors.textMuted} />
-                <Text style={styles.statText}>{item.view_count}</Text>
+                <Feather name="eye" size={12} color={themeColors.textMuted} />
+                <Text style={[styles.statText, { color: themeColors.textMuted }]}>{item.view_count}</Text>
               </View>
               <View style={styles.stat}>
-                <Feather name="heart" size={12} color={colors.textMuted} />
-                <Text style={styles.statText}>{item.watch_count}</Text>
+                <Feather name="heart" size={12} color={themeColors.textMuted} />
+                <Text style={[styles.statText, { color: themeColors.textMuted }]}>{item.watch_count}</Text>
               </View>
               {isAuction && (
                 <View style={styles.stat}>
-                  <Feather name="trending-up" size={12} color={colors.textMuted} />
-                  <Text style={styles.statText}>{item.bid_count}</Text>
+                  <Feather name="trending-up" size={12} color={themeColors.textMuted} />
+                  <Text style={[styles.statText, { color: themeColors.textMuted }]}>{item.bid_count}</Text>
                 </View>
               )}
             </View>
@@ -227,8 +227,8 @@ export default function MyListingsScreen() {
 
               {isActive && item.end_time && (
                 <View style={styles.timeContainer}>
-                  <Feather name="clock" size={12} color={colors.textMuted} />
-                  <Text style={styles.timeText}>
+                  <Feather name="clock" size={12} color={themeColors.textMuted} />
+                  <Text style={[styles.timeText, { color: themeColors.textMuted }]}>
                     {formatTimeRemaining(item.end_time)}
                   </Text>
                 </View>
@@ -238,14 +238,14 @@ export default function MyListingsScreen() {
         </View>
 
         {/* Actions */}
-        <View style={styles.actionsRow}>
+        <View style={[styles.actionsRow, { borderTopColor: themeColors.border }]}>
           {isDraft && (
             <TouchableOpacity
               style={styles.actionButton}
               onPress={() => handleEditListing(item)}
             >
-              <Feather name="edit-2" size={14} color={colors.accent} />
-              <Text style={styles.actionButtonText}>Continue Editing</Text>
+              <Feather name="edit-2" size={14} color={themeColors.accent} />
+              <Text style={[styles.actionButtonText, { color: themeColors.accent }]}>Continue Editing</Text>
             </TouchableOpacity>
           )}
 
@@ -255,8 +255,8 @@ export default function MyListingsScreen() {
                 style={styles.actionButton}
                 onPress={() => handleEditListing(item)}
               >
-                <Feather name="edit-2" size={14} color={colors.accent} />
-                <Text style={styles.actionButtonText}>Edit</Text>
+                <Feather name="edit-2" size={14} color={themeColors.accent} />
+                <Text style={[styles.actionButtonText, { color: themeColors.accent }]}>Edit</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.actionButton, styles.actionButtonDanger]}
@@ -288,26 +288,26 @@ export default function MyListingsScreen() {
         </View>
       </TouchableOpacity>
     );
-  }, [handleListingPress, handleEditListing, handleCancelListing, navigation]);
+  }, [handleListingPress, handleEditListing, handleCancelListing, navigation, themeColors]);
 
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
-      <Feather name="package" size={48} color={colors.textLight} />
-      <Text style={styles.emptyTitle}>No listings yet</Text>
-      <Text style={styles.emptyText}>
+      <Feather name="package" size={48} color={themeColors.textLight} />
+      <Text style={[styles.emptyTitle, { color: themeColors.textPrimary }]}>No listings yet</Text>
+      <Text style={[styles.emptyText, { color: themeColors.textMuted }]}>
         {filter === 'all'
           ? "Create your first listing to start selling equipment."
           : `No ${filter} listings found.`}
       </Text>
       {filter === 'all' && (
         <TouchableOpacity
-          style={styles.createButton}
+          style={[styles.createButton, { backgroundColor: themeColors.accent }]}
           onPress={() => {
             lightTap();
             navigation.navigate('CreateListing' as never);
           }}
         >
-          <Feather name="plus" size={18} color={colors.white} />
+          <Feather name="plus" size={18} color="#ffffff" />
           <Text style={styles.createButtonText}>Create Listing</Text>
         </TouchableOpacity>
       )}
@@ -320,20 +320,20 @@ export default function MyListingsScreen() {
   const totalViews = listings?.reduce((sum, l) => sum + (l.view_count || 0), 0) || 0;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* Summary Stats */}
       <View style={styles.statsContainer}>
-        <View style={styles.statCard}>
-          <Text style={styles.statCardValue}>{activeCount}</Text>
-          <Text style={styles.statCardLabel}>Active</Text>
+        <View style={[styles.statCard, { backgroundColor: themeColors.surface }]}>
+          <Text style={[styles.statCardValue, { color: themeColors.textPrimary }]}>{activeCount}</Text>
+          <Text style={[styles.statCardLabel, { color: themeColors.textMuted }]}>Active</Text>
         </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statCardValue}>{draftCount}</Text>
-          <Text style={styles.statCardLabel}>Drafts</Text>
+        <View style={[styles.statCard, { backgroundColor: themeColors.surface }]}>
+          <Text style={[styles.statCardValue, { color: themeColors.textPrimary }]}>{draftCount}</Text>
+          <Text style={[styles.statCardLabel, { color: themeColors.textMuted }]}>Drafts</Text>
         </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statCardValue}>{totalViews}</Text>
-          <Text style={styles.statCardLabel}>Total Views</Text>
+        <View style={[styles.statCard, { backgroundColor: themeColors.surface }]}>
+          <Text style={[styles.statCardValue, { color: themeColors.textPrimary }]}>{totalViews}</Text>
+          <Text style={[styles.statCardLabel, { color: themeColors.textMuted }]}>Total Views</Text>
         </View>
       </View>
 
@@ -348,7 +348,8 @@ export default function MyListingsScreen() {
             <TouchableOpacity
               style={[
                 styles.filterChip,
-                filter === item.key && styles.filterChipActive,
+                { backgroundColor: themeColors.surface, borderColor: themeColors.border },
+                filter === item.key && { backgroundColor: themeColors.accent, borderColor: themeColors.accent },
               ]}
               onPress={() => {
                 lightTap();
@@ -358,7 +359,8 @@ export default function MyListingsScreen() {
               <Text
                 style={[
                   styles.filterText,
-                  filter === item.key && styles.filterTextActive,
+                  { color: themeColors.textSecondary },
+                  filter === item.key && { color: '#ffffff' },
                 ]}
               >
                 {item.label}
@@ -372,7 +374,7 @@ export default function MyListingsScreen() {
       {/* Listings List */}
       {isLoading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.accent} />
+          <ActivityIndicator size="large" color={themeColors.accent} />
         </View>
       ) : (
         <FlatList
@@ -388,7 +390,7 @@ export default function MyListingsScreen() {
             <RefreshControl
               refreshing={isLoading}
               onRefresh={refetch}
-              tintColor={colors.accent}
+              tintColor={themeColors.accent}
             />
           }
           ListEmptyComponent={renderEmptyState}
@@ -397,13 +399,13 @@ export default function MyListingsScreen() {
 
       {/* Floating Create Button */}
       <TouchableOpacity
-        style={[styles.floatingButton, { bottom: insets.bottom + spacing.xl }]}
+        style={[styles.floatingButton, { bottom: insets.bottom + spacing.xl, backgroundColor: themeColors.accent }]}
         onPress={() => {
           lightTap();
           navigation.navigate('CreateListing' as never);
         }}
       >
-        <Feather name="plus" size={24} color={colors.white} />
+        <Feather name="plus" size={24} color="#ffffff" />
       </TouchableOpacity>
     </View>
   );

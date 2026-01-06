@@ -30,10 +30,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .from('profiles')
         .select('*')
         .eq('id', userId)
-        .single();
+        .maybeSingle(); // Use maybeSingle instead of single to not throw on 0 rows
 
       if (error) throw error;
-      setProfile(data);
+
+      if (data) {
+        setProfile(data);
+      } else {
+        // Profile doesn't exist - this can happen if the trigger didn't fire
+        // Try to create a basic profile with only core columns
+        console.log('Profile not found, attempting to create one...');
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData?.user) {
+          const { data: newProfile, error: createError } = await supabase
+            .from('profiles')
+            .insert({
+              id: userId,
+              email: userData.user.email,
+              full_name: userData.user.user_metadata?.full_name || null,
+            })
+            .select()
+            .single();
+
+          if (createError) {
+            console.error('Error creating profile:', createError);
+            setProfile(null);
+          } else {
+            setProfile(newProfile);
+          }
+        }
+      }
     } catch (error) {
       console.error('Error fetching profile:', error);
       setProfile(null);
@@ -43,18 +69,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Initialize auth state
   useEffect(() => {
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      // Handle invalid refresh token error
+      if (error) {
+        console.error('Session error:', error.message);
+        // Clear invalid session data
+        if (error.message?.includes('Refresh Token') || error.message?.includes('Invalid')) {
+          console.log('Invalid refresh token detected, clearing session...');
+          supabase.auth.signOut();
+        }
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+        setIsLoading(false);
+        return;
+      }
+
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchProfile(session.user.id);
       }
       setIsLoading(false);
+    }).catch((error) => {
+      // Catch any unexpected errors during session retrieval
+      console.error('Unexpected session error:', error);
+      setSession(null);
+      setUser(null);
+      setProfile(null);
+      setIsLoading(false);
     });
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        // Handle token refresh errors
+        if (event === 'TOKEN_REFRESHED' && !session) {
+          console.log('Token refresh failed, signing out...');
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+          return;
+        }
+
         setSession(session);
         setUser(session?.user ?? null);
 

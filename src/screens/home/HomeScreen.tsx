@@ -53,7 +53,7 @@ export default function HomeScreen({ navigation }: Props) {
 
   const renderListing = useCallback(({ item }: { item: ListingWithImages }) => {
     const primaryImage = item.images?.find(img => img.is_primary) || item.images?.[0];
-    const isAuction = item.listing_type === 'auction' || item.listing_type === 'auction_buy_now';
+    const isAuction = item.listing_type === 'auction' || item.listing_type === 'auction_with_offers';
     const price = isAuction ? item.current_bid || item.starting_price : item.fixed_price;
     const hasReserve = item.reserve_price && (!item.current_bid || item.current_bid < item.reserve_price);
 

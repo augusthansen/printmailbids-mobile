@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 import { formatRelativeTime } from '../../utils/formatters';
 import { lightTap, successFeedback, errorFeedback } from '../../utils/haptics';
@@ -38,6 +39,7 @@ type FilterType = 'all' | 'sellers' | 'admins' | 'suspended';
 export default function AdminUsersScreen() {
   const insets = useSafeAreaInsets();
   const { profile } = useAuth();
+  const { colors: themeColors, isDark } = useTheme();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterType>('all');
@@ -165,20 +167,28 @@ export default function AdminUsersScreen() {
 
   const FilterButton = ({ type, label }: { type: FilterType; label: string }) => (
     <TouchableOpacity
-      style={[styles.filterButton, filter === type && styles.filterButtonActive]}
+      style={[
+        styles.filterButton,
+        { backgroundColor: themeColors.surface },
+        filter === type && { backgroundColor: themeColors.accent }
+      ]}
       onPress={() => {
         lightTap();
         setFilter(type);
       }}
     >
-      <Text style={[styles.filterButtonText, filter === type && styles.filterButtonTextActive]}>
+      <Text style={[
+        styles.filterButtonText,
+        { color: themeColors.textSecondary },
+        filter === type && { color: colors.white }
+      ]}>
         {label}
       </Text>
     </TouchableOpacity>
   );
 
   const renderUser = ({ item }: { item: User }) => (
-    <View style={styles.userCard}>
+    <View style={[styles.userCard, { backgroundColor: themeColors.surface }]}>
       <View style={styles.userHeader}>
         <Image
           source={item.avatar_url ? { uri: item.avatar_url } : require('../../../assets/avatar-placeholder.png')}
@@ -186,10 +196,10 @@ export default function AdminUsersScreen() {
           contentFit="cover"
         />
         <View style={styles.userInfo}>
-          <Text style={styles.userName} numberOfLines={1}>
+          <Text style={[styles.userName, { color: themeColors.textPrimary }]} numberOfLines={1}>
             {item.full_name || item.company_name || 'No name'}
           </Text>
-          <Text style={styles.userEmail} numberOfLines={1}>{item.email}</Text>
+          <Text style={[styles.userEmail, { color: themeColors.textMuted }]} numberOfLines={1}>{item.email}</Text>
           <View style={styles.badgeRow}>
             {item.is_admin && (
               <View style={[styles.badge, styles.adminBadge]}>
@@ -217,23 +227,35 @@ export default function AdminUsersScreen() {
         </View>
       </View>
 
-      <Text style={styles.joinedText}>
+      <Text style={[styles.joinedText, { color: themeColors.textMuted }]}>
         Joined {formatRelativeTime(item.created_at)}
       </Text>
 
-      <View style={styles.actionRow}>
+      <View style={[styles.actionRow, { borderTopColor: themeColors.border }]}>
         <TouchableOpacity
-          style={[styles.actionButton, item.is_seller && styles.actionButtonActive]}
+          style={[
+            styles.actionButton,
+            { borderColor: themeColors.border },
+            item.is_seller && { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+          ]}
           onPress={() => handleUserAction(item, 'seller')}
         >
-          <Feather name="package" size={16} color={item.is_seller ? colors.white : colors.accent} />
-          <Text style={[styles.actionButtonText, item.is_seller && styles.actionButtonTextActive]}>
+          <Feather name="package" size={16} color={item.is_seller ? colors.white : themeColors.accent} />
+          <Text style={[
+            styles.actionButtonText,
+            { color: themeColors.textSecondary },
+            item.is_seller && { color: colors.white }
+          ]}>
             {item.is_seller ? 'Is Seller' : 'Make Seller'}
           </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.actionButton, item.status === 'suspended' && styles.actionButtonDanger]}
+          style={[
+            styles.actionButton,
+            { borderColor: themeColors.border },
+            item.status === 'suspended' && styles.actionButtonDanger
+          ]}
           onPress={() => handleUserAction(item, 'suspend')}
         >
           <Feather
@@ -247,7 +269,11 @@ export default function AdminUsersScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.actionButton, item.is_admin && styles.actionButtonWarning]}
+          style={[
+            styles.actionButton,
+            { borderColor: themeColors.border },
+            item.is_admin && styles.actionButtonWarning
+          ]}
           onPress={() => handleUserAction(item, 'admin')}
         >
           <Feather name="shield" size={16} color={item.is_admin ? colors.white : colors.warning} />
@@ -261,36 +287,36 @@ export default function AdminUsersScreen() {
 
   if (!profile?.is_admin) {
     return (
-      <View style={styles.unauthorizedContainer}>
+      <View style={[styles.unauthorizedContainer, { backgroundColor: themeColors.background }]}>
         <Feather name="shield-off" size={48} color={colors.error} />
-        <Text style={styles.unauthorizedText}>Access Denied</Text>
+        <Text style={[styles.unauthorizedText, { color: themeColors.textMuted }]}>Access Denied</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchInputContainer}>
-          <Feather name="search" size={20} color={colors.textMuted} />
+      <View style={[styles.searchContainer, { backgroundColor: themeColors.surface, borderBottomColor: themeColors.border }]}>
+        <View style={[styles.searchInputContainer, { backgroundColor: themeColors.inputBackground }]}>
+          <Feather name="search" size={20} color={themeColors.textMuted} />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: themeColors.textPrimary }]}
             placeholder="Search users..."
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={themeColors.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Feather name="x" size={20} color={colors.textMuted} />
+              <Feather name="x" size={20} color={themeColors.textMuted} />
             </TouchableOpacity>
           )}
         </View>
       </View>
 
       {/* Filters */}
-      <View style={styles.filterRow}>
+      <View style={[styles.filterRow, { backgroundColor: themeColors.surface, borderBottomColor: themeColors.border }]}>
         <FilterButton type="all" label="All" />
         <FilterButton type="sellers" label="Sellers" />
         <FilterButton type="admins" label="Admins" />
@@ -300,7 +326,7 @@ export default function AdminUsersScreen() {
       {/* User List */}
       {isLoading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.accent} />
+          <ActivityIndicator size="large" color={themeColors.accent} />
         </View>
       ) : (
         <FlatList
@@ -309,13 +335,13 @@ export default function AdminUsersScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + spacing.xl }]}
           refreshControl={
-            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.accent} />
+            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={themeColors.accent} />
           }
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Feather name="users" size={48} color={colors.textLight} />
-              <Text style={styles.emptyTitle}>No Users Found</Text>
-              <Text style={styles.emptyText}>
+              <Feather name="users" size={48} color={themeColors.textMuted} />
+              <Text style={[styles.emptyTitle, { color: themeColors.textPrimary }]}>No Users Found</Text>
+              <Text style={[styles.emptyText, { color: themeColors.textMuted }]}>
                 {searchQuery ? 'Try a different search term' : 'No users match the current filter'}
               </Text>
             </View>

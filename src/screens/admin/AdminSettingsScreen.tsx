@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 import { lightTap, successFeedback, errorFeedback } from '../../utils/haptics';
 
@@ -37,6 +38,7 @@ interface PlatformSettings {
 export default function AdminSettingsScreen() {
   const insets = useSafeAreaInsets();
   const { profile } = useAuth();
+  const { colors: themeColors, isDark } = useTheme();
   const queryClient = useQueryClient();
 
   // Local state for form
@@ -120,13 +122,13 @@ export default function AdminSettingsScreen() {
   }) => (
     <View style={styles.settingRow}>
       <View style={styles.settingInfo}>
-        <Text style={[styles.settingLabel, dangerous && styles.dangerousLabel]}>{label}</Text>
-        <Text style={styles.settingDescription}>{description}</Text>
+        <Text style={[styles.settingLabel, { color: themeColors.textPrimary }, dangerous && styles.dangerousLabel]}>{label}</Text>
+        <Text style={[styles.settingDescription, { color: themeColors.textMuted }]}>{description}</Text>
       </View>
       <Switch
         value={value}
         onValueChange={onValueChange}
-        trackColor={{ false: colors.border, true: dangerous ? colors.error : colors.accent }}
+        trackColor={{ false: themeColors.border, true: dangerous ? colors.error : themeColors.accent }}
         thumbColor={colors.white}
       />
     </View>
@@ -149,40 +151,40 @@ export default function AdminSettingsScreen() {
   }) => (
     <View style={styles.settingRow}>
       <View style={styles.settingInfo}>
-        <Text style={styles.settingLabel}>{label}</Text>
-        <Text style={styles.settingDescription}>{description}</Text>
+        <Text style={[styles.settingLabel, { color: themeColors.textPrimary }]}>{label}</Text>
+        <Text style={[styles.settingDescription, { color: themeColors.textMuted }]}>{description}</Text>
       </View>
-      <View style={styles.inputContainer}>
+      <View style={[styles.inputContainer, { backgroundColor: themeColors.inputBackground }]}>
         <TextInput
-          style={styles.settingInput}
+          style={[styles.settingInput, { color: themeColors.textPrimary }]}
           value={value}
           onChangeText={onChangeText}
           keyboardType={keyboardType}
         />
-        {suffix && <Text style={styles.inputSuffix}>{suffix}</Text>}
+        {suffix && <Text style={[styles.inputSuffix, { color: themeColors.textMuted }]}>{suffix}</Text>}
       </View>
     </View>
   );
 
   if (!profile?.is_admin) {
     return (
-      <View style={styles.unauthorizedContainer}>
+      <View style={[styles.unauthorizedContainer, { backgroundColor: themeColors.background }]}>
         <Feather name="shield-off" size={48} color={colors.error} />
-        <Text style={styles.unauthorizedText}>Access Denied</Text>
+        <Text style={[styles.unauthorizedText, { color: themeColors.textMuted }]}>Access Denied</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={{ paddingBottom: insets.bottom + spacing['3xl'] + 80 }}
       >
         {/* Fee Settings */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Fee Configuration</Text>
-          <View style={styles.card}>
+          <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Fee Configuration</Text>
+          <View style={[styles.card, { backgroundColor: themeColors.surface }]}>
             <SettingInput
               label="Buyer Premium"
               description="Percentage charged to buyers on top of winning bid/offer"
@@ -190,7 +192,7 @@ export default function AdminSettingsScreen() {
               onChangeText={(text) => updateSetting('buyer_premium_rate', parseFloat(text) || 0)}
               suffix="%"
             />
-            <View style={styles.divider} />
+            <View style={[styles.divider, { backgroundColor: themeColors.border }]} />
             <SettingInput
               label="Seller Fee"
               description="Percentage deducted from seller payouts"
@@ -198,7 +200,7 @@ export default function AdminSettingsScreen() {
               onChangeText={(text) => updateSetting('seller_fee_rate', parseFloat(text) || 0)}
               suffix="%"
             />
-            <View style={styles.divider} />
+            <View style={[styles.divider, { backgroundColor: themeColors.border }]} />
             <SettingInput
               label="Featured Listing Price"
               description="Cost for sellers to feature their listing"
@@ -211,8 +213,8 @@ export default function AdminSettingsScreen() {
 
         {/* Listing Settings */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Listing Rules</Text>
-          <View style={styles.card}>
+          <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Listing Rules</Text>
+          <View style={[styles.card, { backgroundColor: themeColors.surface }]}>
             <SettingInput
               label="Minimum Price"
               description="Minimum starting price or fixed price for listings"
@@ -220,7 +222,7 @@ export default function AdminSettingsScreen() {
               onChangeText={(text) => updateSetting('minimum_listing_price', parseFloat(text) || 0)}
               suffix="$"
             />
-            <View style={styles.divider} />
+            <View style={[styles.divider, { backgroundColor: themeColors.border }]} />
             <SettingInput
               label="Max Duration"
               description="Maximum number of days a listing can run"
@@ -228,7 +230,7 @@ export default function AdminSettingsScreen() {
               onChangeText={(text) => updateSetting('maximum_listing_duration_days', parseInt(text) || 0)}
               suffix="days"
             />
-            <View style={styles.divider} />
+            <View style={[styles.divider, { backgroundColor: themeColors.border }]} />
             <SettingInput
               label="Auto-Decline Threshold"
               description="Automatically decline offers below this % of asking price"
@@ -241,15 +243,15 @@ export default function AdminSettingsScreen() {
 
         {/* Verification Settings */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Verification</Text>
-          <View style={styles.card}>
+          <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Verification</Text>
+          <View style={[styles.card, { backgroundColor: themeColors.surface }]}>
             <SettingToggle
               label="Require Email Verification"
               description="Users must verify their email before bidding"
               value={settings.require_email_verification}
               onValueChange={(value) => updateSetting('require_email_verification', value)}
             />
-            <View style={styles.divider} />
+            <View style={[styles.divider, { backgroundColor: themeColors.border }]} />
             <SettingToggle
               label="Require Seller Verification"
               description="Sellers must be manually verified before listing"
@@ -261,15 +263,15 @@ export default function AdminSettingsScreen() {
 
         {/* Payment Settings */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Payment Methods</Text>
-          <View style={styles.card}>
+          <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Payment Methods</Text>
+          <View style={[styles.card, { backgroundColor: themeColors.surface }]}>
             <SettingToggle
               label="Stripe Payments"
               description="Enable credit/debit card payments via Stripe"
               value={settings.stripe_enabled}
               onValueChange={(value) => updateSetting('stripe_enabled', value)}
             />
-            <View style={styles.divider} />
+            <View style={[styles.divider, { backgroundColor: themeColors.border }]} />
             <SettingToggle
               label="PayPal Payments"
               description="Enable PayPal as a payment option"
@@ -281,15 +283,15 @@ export default function AdminSettingsScreen() {
 
         {/* Platform Controls */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Platform Controls</Text>
-          <View style={styles.card}>
+          <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Platform Controls</Text>
+          <View style={[styles.card, { backgroundColor: themeColors.surface }]}>
             <SettingToggle
               label="Allow New Registrations"
               description="Allow new users to create accounts"
               value={settings.allow_new_registrations}
               onValueChange={(value) => updateSetting('allow_new_registrations', value)}
             />
-            <View style={styles.divider} />
+            <View style={[styles.divider, { backgroundColor: themeColors.border }]} />
             <SettingToggle
               label="Allow New Listings"
               description="Allow sellers to create new listings"
@@ -302,7 +304,7 @@ export default function AdminSettingsScreen() {
         {/* Danger Zone */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, styles.dangerTitle]}>Danger Zone</Text>
-          <View style={[styles.card, styles.dangerCard]}>
+          <View style={[styles.card, { backgroundColor: themeColors.surface }, styles.dangerCard]}>
             <SettingToggle
               label="Maintenance Mode"
               description="Put the platform in maintenance mode. Only admins can access."
@@ -324,16 +326,16 @@ export default function AdminSettingsScreen() {
 
         {/* Version Info */}
         <View style={styles.versionContainer}>
-          <Text style={styles.versionText}>PrintMailBids Admin v1.0.0</Text>
-          <Text style={styles.versionSubtext}>Mobile App Build 2026.01.01</Text>
+          <Text style={[styles.versionText, { color: themeColors.textMuted }]}>PrintMailBids Admin v1.0.0</Text>
+          <Text style={[styles.versionSubtext, { color: themeColors.textMuted }]}>Mobile App Build 2026.01.01</Text>
         </View>
       </ScrollView>
 
       {/* Save Button */}
       {hasChanges && (
-        <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+        <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md, backgroundColor: themeColors.surface, borderTopColor: themeColors.border }]}>
           <TouchableOpacity
-            style={[styles.saveButton, saveMutation.isPending && styles.saveButtonDisabled]}
+            style={[styles.saveButton, { backgroundColor: themeColors.accent }, saveMutation.isPending && styles.saveButtonDisabled]}
             onPress={handleSave}
             disabled={saveMutation.isPending}
           >

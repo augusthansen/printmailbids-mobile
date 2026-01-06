@@ -16,6 +16,7 @@ import { ActivityStackParamList } from '../../navigation/types';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { Bid, Listing, ListingImage } from '../../types/database';
 import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 import { formatCurrency, formatTimeRemaining, formatRelativeTime } from '../../utils/formatters';
@@ -42,6 +43,7 @@ export default function MyBidsScreen() {
   const navigation = useNavigation<NavigationProp<ActivityStackParamList>>();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { colors: themeColors, isDark } = useTheme();
   const [filter, setFilter] = useState<FilterType>('all');
 
   const { data: bids, isLoading, refetch } = useQuery<BidWithListing[]>({
@@ -101,7 +103,7 @@ export default function MyBidsScreen() {
 
     return (
       <TouchableOpacity
-        style={styles.bidCard}
+        style={[styles.bidCard, { backgroundColor: themeColors.surface }]}
         onPress={() => handleBidPress(item)}
         activeOpacity={0.7}
       >
@@ -110,32 +112,32 @@ export default function MyBidsScreen() {
           {primaryImage?.url ? (
             <Image source={primaryImage.url} style={styles.listingImage} contentFit="cover" />
           ) : (
-            <View style={styles.imagePlaceholder}>
-              <Feather name="package" size={24} color={colors.textLight} />
+            <View style={[styles.imagePlaceholder, { backgroundColor: themeColors.sand }]}>
+              <Feather name="package" size={24} color={themeColors.textLight} />
             </View>
           )}
 
           {/* Details */}
           <View style={styles.bidDetails}>
-            <Text style={styles.listingTitle} numberOfLines={2}>
+            <Text style={[styles.listingTitle, { color: themeColors.textPrimary }]} numberOfLines={2}>
               {item.listing.title}
             </Text>
 
             <View style={styles.bidRow}>
-              <Text style={styles.bidLabel}>Your Bid:</Text>
-              <Text style={styles.bidAmount}>{formatCurrency(item.amount)}</Text>
+              <Text style={[styles.bidLabel, { color: themeColors.textMuted }]}>Your Bid:</Text>
+              <Text style={[styles.bidAmount, { color: themeColors.textPrimary }]}>{formatCurrency(item.amount)}</Text>
             </View>
 
             {item.max_bid > item.amount && (
               <View style={styles.bidRow}>
-                <Text style={styles.bidLabel}>Max Bid:</Text>
-                <Text style={styles.maxBidAmount}>{formatCurrency(item.max_bid)}</Text>
+                <Text style={[styles.bidLabel, { color: themeColors.textMuted }]}>Max Bid:</Text>
+                <Text style={[styles.maxBidAmount, { color: themeColors.textMuted }]}>{formatCurrency(item.max_bid)}</Text>
               </View>
             )}
 
             <View style={styles.bidRow}>
-              <Text style={styles.bidLabel}>Current:</Text>
-              <Text style={styles.currentBid}>
+              <Text style={[styles.bidLabel, { color: themeColors.textMuted }]}>Current:</Text>
+              <Text style={[styles.currentBid, { color: themeColors.accent }]}>
                 {formatCurrency(item.listing.current_bid || item.listing.starting_price || 0)}
               </Text>
             </View>
@@ -147,8 +149,8 @@ export default function MyBidsScreen() {
 
               {!isAuctionEnded && item.listing.end_time && (
                 <View style={styles.timeContainer}>
-                  <Feather name="clock" size={12} color={colors.textMuted} />
-                  <Text style={styles.timeText}>
+                  <Feather name="clock" size={12} color={themeColors.textMuted} />
+                  <Text style={[styles.timeText, { color: themeColors.textMuted }]}>
                     {formatTimeRemaining(item.listing.end_time)}
                   </Text>
                 </View>
@@ -159,40 +161,40 @@ export default function MyBidsScreen() {
 
         {/* Action indicator */}
         {item.status === 'outbid' && !isAuctionEnded && (
-          <View style={styles.actionBanner}>
-            <Feather name="alert-circle" size={14} color={colors.warning} />
-            <Text style={styles.actionText}>You've been outbid! Place a higher bid.</Text>
+          <View style={[styles.actionBanner, { backgroundColor: themeColors.warningLight }]}>
+            <Feather name="alert-circle" size={14} color={themeColors.warning} />
+            <Text style={[styles.actionText, { color: themeColors.warning }]}>You've been outbid! Place a higher bid.</Text>
           </View>
         )}
 
         {item.status === 'won' && (
           <TouchableOpacity
-            style={styles.payNowButton}
+            style={[styles.payNowButton, { backgroundColor: themeColors.success }]}
             onPress={() => {
               lightTap();
               navigation.navigate('MyInvoices');
             }}
           >
             <Text style={styles.payNowText}>Pay Now</Text>
-            <Feather name="arrow-right" size={16} color={colors.white} />
+            <Feather name="arrow-right" size={16} color="#ffffff" />
           </TouchableOpacity>
         )}
       </TouchableOpacity>
     );
-  }, [handleBidPress, navigation]);
+  }, [handleBidPress, navigation, themeColors]);
 
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
-      <Feather name="trending-up" size={48} color={colors.textLight} />
-      <Text style={styles.emptyTitle}>No bids yet</Text>
-      <Text style={styles.emptyText}>
+      <Feather name="trending-up" size={48} color={themeColors.textLight} />
+      <Text style={[styles.emptyTitle, { color: themeColors.textPrimary }]}>No bids yet</Text>
+      <Text style={[styles.emptyText, { color: themeColors.textMuted }]}>
         {filter === 'all'
           ? "You haven't placed any bids yet. Browse listings to find equipment."
           : `No ${filter} bids found.`}
       </Text>
       {filter === 'all' && (
         <TouchableOpacity
-          style={styles.browseButton}
+          style={[styles.browseButton, { backgroundColor: themeColors.accent }]}
           onPress={() => navigation.getParent()?.navigate('HomeTab')}
         >
           <Text style={styles.browseButtonText}>Browse Listings</Text>
@@ -202,9 +204,9 @@ export default function MyBidsScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* Filter Bar */}
-      <View style={styles.filterContainer}>
+      <View style={[styles.filterContainer, { backgroundColor: themeColors.surface, borderBottomColor: themeColors.border }]}>
         <FlatList
           horizontal
           data={FILTERS}
@@ -214,7 +216,8 @@ export default function MyBidsScreen() {
             <TouchableOpacity
               style={[
                 styles.filterChip,
-                filter === item.key && styles.filterChipActive,
+                { backgroundColor: themeColors.surface, borderColor: themeColors.border },
+                filter === item.key && { backgroundColor: themeColors.accent, borderColor: themeColors.accent },
               ]}
               onPress={() => {
                 lightTap();
@@ -224,7 +227,8 @@ export default function MyBidsScreen() {
               <Text
                 style={[
                   styles.filterText,
-                  filter === item.key && styles.filterTextActive,
+                  { color: themeColors.textSecondary },
+                  filter === item.key && { color: '#ffffff' },
                 ]}
               >
                 {item.label}
@@ -238,7 +242,7 @@ export default function MyBidsScreen() {
       {/* Bids List */}
       {isLoading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.accent} />
+          <ActivityIndicator size="large" color={themeColors.accent} />
         </View>
       ) : (
         <FlatList
@@ -254,7 +258,7 @@ export default function MyBidsScreen() {
             <RefreshControl
               refreshing={isLoading}
               onRefresh={refetch}
-              tintColor={colors.accent}
+              tintColor={themeColors.accent}
             />
           }
           ListEmptyComponent={renderEmptyState}

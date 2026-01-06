@@ -18,6 +18,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { ListingWithDetails, ListingImage } from '../../types/database';
 import { HomeStackParamList } from '../../navigation/types';
 import {
@@ -40,19 +41,19 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
   const { listingId } = route.params;
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { colors: themeColors, isDark } = useTheme();
   const queryClient = useQueryClient();
 
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [galleryVisible, setGalleryVisible] = useState(false);
   const [galleryInitialIndex, setGalleryInitialIndex] = useState(0);
+  const [termsExpanded, setTermsExpanded] = useState(false);
   const imageScrollRef = useRef<ScrollView>(null);
 
   // Fetch listing with all details
   const { data: listing, isLoading, error: queryError, refetch, isRefetching } = useQuery({
     queryKey: ['listing', listingId],
     queryFn: async () => {
-      console.log('Fetching listing:', listingId);
-
       // Simplified query - only join tables that exist
       const { data, error } = await supabase
         .from('listings')
@@ -65,11 +66,8 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
         .single();
 
       if (error) {
-        console.error('Supabase error:', error);
         throw error;
       }
-
-      console.log('Listing data:', data);
 
       // Check if user is watching this listing
       if (user) {
@@ -169,25 +167,14 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
     navigation.navigate('MakeOffer', { listingId });
   };
 
-  const handleBuyNow = () => {
-    if (!user) {
-      Alert.alert('Sign In Required', 'Please sign in to purchase');
-      return;
-    }
+  const handleRelist = () => {
+    if (!listing) return;
     mediumTap();
-    Alert.alert(
-      'Confirm Purchase',
-      `Are you sure you want to buy this item for ${formatCurrency(listing?.buy_now_price || listing?.fixed_price || 0)}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Buy Now', onPress: () => processBuyNow() },
-      ]
-    );
-  };
-
-  const processBuyNow = async () => {
-    // TODO: Implement buy now flow
-    Alert.alert('Coming Soon', 'Buy now functionality will be available soon');
+    // Navigate to edit listing screen where seller can update dates and relist
+    navigation.navigate('ProfileTab' as never, {
+      screen: 'EditListing',
+      params: { listingId },
+    } as never);
   };
 
   const handleContactSeller = async () => {
@@ -242,8 +229,7 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
         screen: 'Conversation',
         params: { conversationId: newConv.id },
       } as never);
-    } catch (error) {
-      console.error('Error creating conversation:', error);
+    } catch {
       Alert.alert('Error', 'Failed to start conversation. Please try again.');
     }
   };
@@ -261,22 +247,22 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
 
   if (isLoading) {
     return (
-      <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={colors.accent} />
+      <View style={[styles.loadingContainer, { paddingTop: insets.top, backgroundColor: themeColors.background }]}>
+        <ActivityIndicator size="large" color={themeColors.accent} />
       </View>
     );
   }
 
   if (!listing || queryError) {
     return (
-      <View style={[styles.errorContainer, { paddingTop: insets.top }]}>
-        <Feather name="alert-circle" size={48} color={colors.textMuted} />
-        <Text style={styles.errorText}>Listing not found</Text>
+      <View style={[styles.errorContainer, { paddingTop: insets.top, backgroundColor: themeColors.background }]}>
+        <Feather name="alert-circle" size={48} color={themeColors.textMuted} />
+        <Text style={[styles.errorText, { color: themeColors.textPrimary }]}>Listing not found</Text>
         {queryError && (
-          <Text style={styles.errorDetail}>{(queryError as Error).message}</Text>
+          <Text style={[styles.errorDetail, { color: themeColors.textMuted }]}>{(queryError as Error).message}</Text>
         )}
-        <Text style={styles.errorDetail}>ID: {listingId}</Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+        <Text style={[styles.errorDetail, { color: themeColors.textMuted }]}>ID: {listingId}</Text>
+        <TouchableOpacity style={[styles.backButton, { backgroundColor: themeColors.accent }]} onPress={() => navigation.goBack()}>
           <Text style={styles.backButtonText}>Go Back</Text>
         </TouchableOpacity>
       </View>
@@ -284,36 +270,52 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
   }
 
   const images = listing.images?.sort((a, b) => a.sort_order - b.sort_order) || [];
-  const isAuction = listing.listing_type === 'auction' || listing.listing_type === 'auction_buy_now';
-  const hasEnded = listing.status === 'ended' || listing.status === 'sold';
+  const isAuction = listing.listing_type === 'auction' || listing.listing_type === 'auction_with_offers';
+  const hasOffers = listing.listing_type === 'make_offer' || listing.listing_type === 'auction_with_offers';
+
+  // Check if auction has ended - either by status OR by end_time having passed
+  const now = new Date();
+  const endTime = listing.end_time ? new Date(listing.end_time) : null;
+  const isTimePassed = endTime ? endTime < now : false;
+  const hasEnded = listing.status === 'ended' || listing.status === 'sold' || listing.status === 'cancelled' || listing.status === 'expired' || isTimePassed;
+
+  const isSold = listing.status === 'sold';
+  const isOwner = user?.id === listing.seller_id;
+
+  // Offers can still be made on ended auctions that didn't sell (no winning bid)
+  const canMakeOffer = hasOffers && !isSold && listing.status !== 'cancelled' && !isOwner;
+
+  // Seller can relist if auction ended but didn't sell
+  const canRelist = isOwner && hasEnded && !isSold;
+
   const currentPrice = isAuction ? (listing.current_bid || listing.starting_price) : listing.fixed_price;
   const hasReserve = listing.reserve_price && (!listing.current_bid || listing.current_bid < listing.reserve_price);
   const reserveMet = listing.reserve_price && listing.current_bid && listing.current_bid >= listing.reserve_price;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* Back Button - Always Visible */}
       <TouchableOpacity
-        style={[styles.floatingButton, styles.backFloating, { top: insets.top + spacing.sm }]}
+        style={[styles.floatingButton, styles.backFloating, { top: insets.top + spacing.sm, backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}
         onPress={() => navigation.goBack()}
       >
-        <Feather name="arrow-left" size={22} color={colors.primary} />
+        <Feather name="arrow-left" size={22} color={themeColors.primary} />
       </TouchableOpacity>
 
       {/* Actions - Always Visible */}
       <View style={[styles.floatingActions, { top: insets.top + spacing.sm }]}>
-        <TouchableOpacity style={styles.floatingButton} onPress={handleShare}>
-          <Feather name="share" size={20} color={colors.primary} />
+        <TouchableOpacity style={[styles.floatingButton, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]} onPress={handleShare}>
+          <Feather name="share" size={20} color={themeColors.primary} />
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.floatingButton}
+          style={[styles.floatingButton, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}
           onPress={handleToggleWatchlist}
           disabled={watchlistMutation.isPending}
         >
           <Feather
             name="heart"
             size={20}
-            color={listing.is_watched ? colors.error : colors.primary}
+            color={listing.is_watched ? themeColors.error : themeColors.primary}
           />
         </TouchableOpacity>
       </View>
@@ -324,7 +326,7 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
           <RefreshControl
             refreshing={isRefetching}
             onRefresh={refetch}
-            tintColor={colors.accent}
+            tintColor={themeColors.accent}
           />
         }
         contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
@@ -383,39 +385,39 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
 
           {/* Status Badge */}
           {hasEnded && (
-            <View style={styles.endedBadge}>
+            <View style={[styles.endedBadge, isSold && styles.soldBadge]}>
               <Text style={styles.endedBadgeText}>
-                {listing.status === 'sold' ? 'SOLD' : 'ENDED'}
+                {listing.status === 'sold' ? 'SOLD' : listing.status === 'cancelled' ? 'CANCELLED' : 'AUCTION ENDED'}
               </Text>
             </View>
           )}
         </View>
 
         {/* Content */}
-        <View style={styles.content}>
+        <View style={[styles.content, { backgroundColor: themeColors.background }]}>
           {/* Title & Category */}
           <View>
             {listing.category && (
-              <Text style={styles.category}>{listing.category.name}</Text>
+              <Text style={[styles.category, { color: themeColors.accent }]}>{listing.category.name}</Text>
             )}
-            <Text style={styles.title}>{listing.title}</Text>
+            <Text style={[styles.title, { color: themeColors.textPrimary }]}>{listing.title}</Text>
 
             {/* Make & Model */}
             {(listing.make || listing.model) && (
-              <Text style={styles.subtitle}>
+              <Text style={[styles.subtitle, { color: themeColors.textMuted }]}>
                 {[listing.make, listing.model, listing.year].filter(Boolean).join(' • ')}
               </Text>
             )}
           </View>
 
           {/* Price Section */}
-          <View style={styles.priceSection}>
+          <View style={[styles.priceSection, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}>
             <View style={styles.priceRow}>
               <View>
-                <Text style={styles.priceLabel}>
+                <Text style={[styles.priceLabel, { color: themeColors.textMuted }]}>
                   {isAuction ? (listing.current_bid ? 'Current Bid' : 'Starting Price') : 'Price'}
                 </Text>
-                <Text style={styles.price}>
+                <Text style={[styles.price, { color: themeColors.textPrimary }]}>
                   {currentPrice ? formatCurrency(currentPrice) : 'No bids yet'}
                 </Text>
               </View>
@@ -424,13 +426,13 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
                 <View style={styles.auctionMeta}>
                   {listing.bid_count > 0 && (
                     <View style={styles.metaItem}>
-                      <Feather name="users" size={14} color={colors.textMuted} />
-                      <Text style={styles.metaText}>{listing.bid_count} bids</Text>
+                      <Feather name="users" size={14} color={themeColors.textMuted} />
+                      <Text style={[styles.metaText, { color: themeColors.textMuted }]}>{listing.bid_count} bids</Text>
                     </View>
                   )}
                   <View style={styles.metaItem}>
-                    <Feather name="eye" size={14} color={colors.textMuted} />
-                    <Text style={styles.metaText}>{listing.watch_count} watching</Text>
+                    <Feather name="eye" size={14} color={themeColors.textMuted} />
+                    <Text style={[styles.metaText, { color: themeColors.textMuted }]}>{listing.watch_count} watching</Text>
                   </View>
                 </View>
               )}
@@ -440,15 +442,15 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
             {isAuction && (
               <View style={styles.reserveRow}>
                 {hasReserve && (
-                  <View style={[styles.statusBadge, styles.reserveBadge]}>
-                    <Feather name="lock" size={12} color={colors.warning} />
-                    <Text style={styles.reserveText}>Reserve not met</Text>
+                  <View style={[styles.statusBadge, styles.reserveBadge, { backgroundColor: themeColors.warningLight }]}>
+                    <Feather name="lock" size={12} color={themeColors.warning} />
+                    <Text style={[styles.reserveText, { color: themeColors.warning }]}>Reserve not met</Text>
                   </View>
                 )}
                 {reserveMet && (
-                  <View style={[styles.statusBadge, styles.reserveMetBadge]}>
-                    <Feather name="check-circle" size={12} color={colors.success} />
-                    <Text style={styles.reserveMetText}>Reserve met</Text>
+                  <View style={[styles.statusBadge, styles.reserveMetBadge, { backgroundColor: themeColors.successLight }]}>
+                    <Feather name="check-circle" size={12} color={themeColors.success} />
+                    <Text style={[styles.reserveMetText, { color: themeColors.success }]}>Reserve met</Text>
                   </View>
                 )}
               </View>
@@ -457,9 +459,9 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
             {/* Time Remaining */}
             {isAuction && !hasEnded && listing.end_time && (
               <View style={styles.timeRow}>
-                <Feather name="clock" size={16} color={colors.warning} />
-                <Text style={styles.timeLabel}>Time Remaining:</Text>
-                <Text style={styles.timeValue}>{formatTimeRemaining(listing.end_time)}</Text>
+                <Feather name="clock" size={16} color={themeColors.warning} />
+                <Text style={[styles.timeLabel, { color: themeColors.textMuted }]}>Time Remaining:</Text>
+                <Text style={[styles.timeValue, { color: themeColors.warning }]}>{formatTimeRemaining(listing.end_time)}</Text>
               </View>
             )}
 
@@ -467,16 +469,18 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
             {listing.my_bid && (
               <View style={[
                 styles.yourBidRow,
-                listing.my_bid.status === 'winning' ? styles.winningBid : styles.outbidBid
+                listing.my_bid.status === 'winning'
+                  ? [styles.winningBid, { backgroundColor: themeColors.successLight }]
+                  : [styles.outbidBid, { backgroundColor: themeColors.errorLight }]
               ]}>
                 <Feather
                   name={listing.my_bid.status === 'winning' ? 'award' : 'alert-circle'}
                   size={16}
-                  color={listing.my_bid.status === 'winning' ? colors.success : colors.error}
+                  color={listing.my_bid.status === 'winning' ? themeColors.success : themeColors.error}
                 />
                 <Text style={[
                   styles.yourBidText,
-                  { color: listing.my_bid.status === 'winning' ? colors.success : colors.error }
+                  { color: listing.my_bid.status === 'winning' ? themeColors.success : themeColors.error }
                 ]}>
                   {listing.my_bid.status === 'winning'
                     ? `You're winning at ${formatCurrency(listing.my_bid.amount)}`
@@ -488,49 +492,49 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
           </View>
 
           {/* 8% Buyer Premium Notice */}
-          <View style={styles.premiumNotice}>
-            <Feather name="info" size={14} color={colors.accent} />
-            <Text style={styles.premiumText}>8% buyer premium applies to all purchases</Text>
+          <View style={[styles.premiumNotice, { backgroundColor: themeColors.accentFaint }]}>
+            <Feather name="info" size={14} color={themeColors.accent} />
+            <Text style={[styles.premiumText, { color: themeColors.accent }]}>8% buyer premium applies to all purchases</Text>
           </View>
 
           {/* Seller Info */}
           {listing.seller && (
             <View style={styles.sellerSection}>
               <TouchableOpacity
-                style={styles.sellerCard}
+                style={[styles.sellerCard, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}
                 onPress={() => navigation.navigate('SellerProfile', { sellerId: listing.seller!.id })}
               >
-                <View style={styles.sellerAvatar}>
+                <View style={[styles.sellerAvatar, { backgroundColor: themeColors.sand }]}>
                   {listing.seller.avatar_url ? (
                     <Image source={{ uri: listing.seller.avatar_url }} style={styles.avatarImage} />
                   ) : (
-                    <Feather name="user" size={24} color={colors.textMuted} />
+                    <Feather name="user" size={24} color={themeColors.textMuted} />
                   )}
                 </View>
                 <View style={styles.sellerInfo}>
-                  <Text style={styles.sellerName}>
+                  <Text style={[styles.sellerName, { color: themeColors.textPrimary }]}>
                     {listing.seller.company_name || listing.seller.full_name || 'Seller'}
                   </Text>
                   {listing.seller.seller_review_count > 0 && (
                     <View style={styles.sellerRating}>
-                      <Feather name="star" size={12} color={colors.warning} />
-                      <Text style={styles.ratingText}>
+                      <Feather name="star" size={12} color={themeColors.warning} />
+                      <Text style={[styles.ratingText, { color: themeColors.textMuted }]}>
                         {listing.seller.seller_rating.toFixed(1)} ({listing.seller.seller_review_count} reviews)
                       </Text>
                     </View>
                   )}
                 </View>
-                <Feather name="chevron-right" size={20} color={colors.textMuted} />
+                <Feather name="chevron-right" size={20} color={themeColors.textMuted} />
               </TouchableOpacity>
 
               {/* Contact Seller Button */}
               {listing.seller_id !== user?.id && (
                 <TouchableOpacity
-                  style={styles.contactSellerButton}
+                  style={[styles.contactSellerButton, { backgroundColor: themeColors.surface, borderColor: themeColors.accent }]}
                   onPress={handleContactSeller}
                 >
-                  <Feather name="message-circle" size={18} color={colors.accent} />
-                  <Text style={styles.contactSellerText}>Contact Seller</Text>
+                  <Feather name="message-circle" size={18} color={themeColors.accent} />
+                  <Text style={[styles.contactSellerText, { color: themeColors.accent }]}>Contact Seller</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -539,55 +543,55 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
           {/* Description */}
           {listing.description && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Description</Text>
-              <Text style={styles.description}>{listing.description}</Text>
+              <Text style={[styles.sectionTitle, { color: themeColors.textPrimary }]}>Description</Text>
+              <Text style={[styles.description, { color: themeColors.textSecondary }]}>{listing.description}</Text>
             </View>
           )}
 
           {/* Equipment Details */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Equipment Details</Text>
-            <View style={styles.specsGrid}>
+            <Text style={[styles.sectionTitle, { color: themeColors.textPrimary }]}>Equipment Details</Text>
+            <View style={[styles.specsGrid, { backgroundColor: themeColors.surface }]}>
               {listing.make && (
-                <View style={styles.specItem}>
-                  <Text style={styles.specLabel}>Make</Text>
-                  <Text style={styles.specValue}>{listing.make}</Text>
+                <View style={[styles.specItem, { borderColor: themeColors.border }]}>
+                  <Text style={[styles.specLabel, { color: themeColors.textMuted }]}>Make</Text>
+                  <Text style={[styles.specValue, { color: themeColors.textPrimary }]}>{listing.make}</Text>
                 </View>
               )}
               {listing.model && (
-                <View style={styles.specItem}>
-                  <Text style={styles.specLabel}>Model</Text>
-                  <Text style={styles.specValue}>{listing.model}</Text>
+                <View style={[styles.specItem, { borderColor: themeColors.border }]}>
+                  <Text style={[styles.specLabel, { color: themeColors.textMuted }]}>Model</Text>
+                  <Text style={[styles.specValue, { color: themeColors.textPrimary }]}>{listing.model}</Text>
                 </View>
               )}
               {listing.year && (
-                <View style={styles.specItem}>
-                  <Text style={styles.specLabel}>Year</Text>
-                  <Text style={styles.specValue}>{listing.year}</Text>
+                <View style={[styles.specItem, { borderColor: themeColors.border }]}>
+                  <Text style={[styles.specLabel, { color: themeColors.textMuted }]}>Year</Text>
+                  <Text style={[styles.specValue, { color: themeColors.textPrimary }]}>{listing.year}</Text>
                 </View>
               )}
               {listing.serial_number && (
-                <View style={styles.specItem}>
-                  <Text style={styles.specLabel}>Serial #</Text>
-                  <Text style={styles.specValue}>{listing.serial_number}</Text>
+                <View style={[styles.specItem, { borderColor: themeColors.border }]}>
+                  <Text style={[styles.specLabel, { color: themeColors.textMuted }]}>Serial #</Text>
+                  <Text style={[styles.specValue, { color: themeColors.textPrimary }]}>{listing.serial_number}</Text>
                 </View>
               )}
               {listing.condition && (
-                <View style={styles.specItem}>
-                  <Text style={styles.specLabel}>Condition</Text>
-                  <Text style={styles.specValue}>{listing.condition}</Text>
+                <View style={[styles.specItem, { borderColor: themeColors.border }]}>
+                  <Text style={[styles.specLabel, { color: themeColors.textMuted }]}>Condition</Text>
+                  <Text style={[styles.specValue, { color: themeColors.textPrimary }]}>{listing.condition}</Text>
                 </View>
               )}
               {listing.hours_count && (
-                <View style={styles.specItem}>
-                  <Text style={styles.specLabel}>Hours</Text>
-                  <Text style={styles.specValue}>{listing.hours_count.toLocaleString()}</Text>
+                <View style={[styles.specItem, { borderColor: themeColors.border }]}>
+                  <Text style={[styles.specLabel, { color: themeColors.textMuted }]}>Hours</Text>
+                  <Text style={[styles.specValue, { color: themeColors.textPrimary }]}>{listing.hours_count.toLocaleString()}</Text>
                 </View>
               )}
               {listing.equipment_status && (
-                <View style={styles.specItem}>
-                  <Text style={styles.specLabel}>Status</Text>
-                  <Text style={styles.specValue}>
+                <View style={[styles.specItem, { borderColor: themeColors.border }]}>
+                  <Text style={[styles.specLabel, { color: themeColors.textMuted }]}>Status</Text>
+                  <Text style={[styles.specValue, { color: themeColors.textPrimary }]}>
                     {listing.equipment_status.replace(/_/g, ' ')}
                   </Text>
                 </View>
@@ -598,26 +602,26 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
           {/* Dimensions & Weight */}
           {(listing.weight_lbs || listing.length_inches || listing.width_inches || listing.height_inches) && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Dimensions & Weight</Text>
-              <View style={styles.specsGrid}>
+              <Text style={[styles.sectionTitle, { color: themeColors.textPrimary }]}>Dimensions & Weight</Text>
+              <View style={[styles.specsGrid, { backgroundColor: themeColors.surface }]}>
                 {listing.weight_lbs && (
-                  <View style={styles.specItem}>
-                    <Text style={styles.specLabel}>Weight</Text>
-                    <Text style={styles.specValue}>{formatWeight(listing.weight_lbs)}</Text>
+                  <View style={[styles.specItem, { borderColor: themeColors.border }]}>
+                    <Text style={[styles.specLabel, { color: themeColors.textMuted }]}>Weight</Text>
+                    <Text style={[styles.specValue, { color: themeColors.textPrimary }]}>{formatWeight(listing.weight_lbs)}</Text>
                   </View>
                 )}
                 {(listing.length_inches || listing.width_inches || listing.height_inches) && (
-                  <View style={styles.specItem}>
-                    <Text style={styles.specLabel}>Dimensions</Text>
-                    <Text style={styles.specValue}>
+                  <View style={[styles.specItem, { borderColor: themeColors.border }]}>
+                    <Text style={[styles.specLabel, { color: themeColors.textMuted }]}>Dimensions</Text>
+                    <Text style={[styles.specValue, { color: themeColors.textPrimary }]}>
                       {formatDimensions(listing.length_inches, listing.width_inches, listing.height_inches)}
                     </Text>
                   </View>
                 )}
                 {listing.floor_length_ft && listing.floor_width_ft && (
-                  <View style={styles.specItem}>
-                    <Text style={styles.specLabel}>Floor Space</Text>
-                    <Text style={styles.specValue}>
+                  <View style={[styles.specItem, { borderColor: themeColors.border }]}>
+                    <Text style={[styles.specLabel, { color: themeColors.textMuted }]}>Floor Space</Text>
+                    <Text style={[styles.specValue, { color: themeColors.textPrimary }]}>
                       {listing.floor_length_ft}' x {listing.floor_width_ft}'
                     </Text>
                   </View>
@@ -628,24 +632,24 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
 
           {/* Location & Logistics */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Location & Pickup</Text>
-            <View style={styles.logisticsCard}>
+            <Text style={[styles.sectionTitle, { color: themeColors.textPrimary }]}>Location & Pickup</Text>
+            <View style={[styles.logisticsCard, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}>
               {listing.location && (
                 <View style={styles.logisticsRow}>
-                  <Feather name="map-pin" size={16} color={colors.accent} />
+                  <Feather name="map-pin" size={16} color={themeColors.accent} />
                   <View>
-                    <Text style={styles.logisticsLabel}>Location</Text>
-                    <Text style={styles.logisticsValue}>
+                    <Text style={[styles.logisticsLabel, { color: themeColors.textMuted }]}>Location</Text>
+                    <Text style={[styles.logisticsValue, { color: themeColors.textPrimary }]}>
                       {listing.location.city}, {listing.location.state}
                     </Text>
                   </View>
                 </View>
               )}
               <View style={styles.logisticsRow}>
-                <Feather name="tool" size={16} color={colors.accent} />
+                <Feather name="tool" size={16} color={themeColors.accent} />
                 <View>
-                  <Text style={styles.logisticsLabel}>Deinstallation</Text>
-                  <Text style={styles.logisticsValue}>
+                  <Text style={[styles.logisticsLabel, { color: themeColors.textMuted }]}>Deinstallation</Text>
+                  <Text style={[styles.logisticsValue, { color: themeColors.textPrimary }]}>
                     {listing.deinstall_responsibility === 'buyer'
                       ? 'Buyer responsible'
                       : listing.deinstall_responsibility === 'seller_included'
@@ -656,10 +660,10 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
               </View>
               {listing.removal_deadline && (
                 <View style={styles.logisticsRow}>
-                  <Feather name="calendar" size={16} color={colors.accent} />
+                  <Feather name="calendar" size={16} color={themeColors.accent} />
                   <View>
-                    <Text style={styles.logisticsLabel}>Removal Deadline</Text>
-                    <Text style={styles.logisticsValue}>
+                    <Text style={[styles.logisticsLabel, { color: themeColors.textMuted }]}>Removal Deadline</Text>
+                    <Text style={[styles.logisticsValue, { color: themeColors.textPrimary }]}>
                       {formatDateTime(listing.removal_deadline)}
                     </Text>
                   </View>
@@ -670,97 +674,115 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
 
           {/* Payment Methods */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Payment Methods</Text>
+            <Text style={[styles.sectionTitle, { color: themeColors.textPrimary }]}>Payment Methods</Text>
             <View style={styles.paymentMethods}>
               {listing.accepts_credit_card && (
-                <View style={styles.paymentBadge}>
-                  <Feather name="credit-card" size={14} color={colors.accent} />
-                  <Text style={styles.paymentText}>Credit Card</Text>
+                <View style={[styles.paymentBadge, { backgroundColor: themeColors.sand }]}>
+                  <Feather name="credit-card" size={14} color={themeColors.accent} />
+                  <Text style={[styles.paymentText, { color: themeColors.textPrimary }]}>Credit Card</Text>
                 </View>
               )}
               {listing.accepts_ach && (
-                <View style={styles.paymentBadge}>
-                  <Feather name="dollar-sign" size={14} color={colors.accent} />
-                  <Text style={styles.paymentText}>ACH</Text>
+                <View style={[styles.paymentBadge, { backgroundColor: themeColors.sand }]}>
+                  <Feather name="dollar-sign" size={14} color={themeColors.accent} />
+                  <Text style={[styles.paymentText, { color: themeColors.textPrimary }]}>ACH</Text>
                 </View>
               )}
               {listing.accepts_wire && (
-                <View style={styles.paymentBadge}>
-                  <Feather name="send" size={14} color={colors.accent} />
-                  <Text style={styles.paymentText}>Wire</Text>
+                <View style={[styles.paymentBadge, { backgroundColor: themeColors.sand }]}>
+                  <Feather name="send" size={14} color={themeColors.accent} />
+                  <Text style={[styles.paymentText, { color: themeColors.textPrimary }]}>Wire</Text>
                 </View>
               )}
               {listing.accepts_check && (
-                <View style={styles.paymentBadge}>
-                  <Feather name="file-text" size={14} color={colors.accent} />
-                  <Text style={styles.paymentText}>Check</Text>
+                <View style={[styles.paymentBadge, { backgroundColor: themeColors.sand }]}>
+                  <Feather name="file-text" size={14} color={themeColors.accent} />
+                  <Text style={[styles.paymentText, { color: themeColors.textPrimary }]}>Check</Text>
                 </View>
               )}
             </View>
-            <Text style={styles.paymentDue}>
+            <Text style={[styles.paymentDue, { color: themeColors.textMuted }]}>
               Payment due within {listing.payment_due_days} days of purchase
             </Text>
           </View>
 
-          {/* Seller Terms */}
+          {/* Seller Terms - Collapsible */}
           {listing.seller_terms && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Seller Terms</Text>
-              <Text style={styles.terms}>{listing.seller_terms}</Text>
+              <TouchableOpacity
+                style={[styles.termsHeader, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}
+                onPress={() => {
+                  lightTap();
+                  setTermsExpanded(!termsExpanded);
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.sectionTitle, { color: themeColors.textPrimary, marginBottom: 0 }]}>Seller Terms</Text>
+                <Feather
+                  name={termsExpanded ? 'chevron-up' : 'chevron-down'}
+                  size={20}
+                  color={themeColors.textMuted}
+                />
+              </TouchableOpacity>
+              {termsExpanded && (
+                <ScrollView
+                  style={[styles.termsScrollContainer, { backgroundColor: themeColors.sand, borderColor: themeColors.border }]}
+                  nestedScrollEnabled
+                >
+                  <Text style={[styles.terms, { color: themeColors.textSecondary, backgroundColor: 'transparent' }]}>
+                    {listing.seller_terms}
+                  </Text>
+                </ScrollView>
+              )}
             </View>
           )}
         </View>
       </ScrollView>
 
       {/* Bottom Action Bar */}
-      {!hasEnded && (
-        <View style={[styles.actionBar, { paddingBottom: insets.bottom + spacing.md }]}>
-          {isAuction ? (
-            <View style={styles.actionButtons}>
+      {(!hasEnded || canMakeOffer || canRelist) && (
+        <View style={[styles.actionBar, { paddingBottom: insets.bottom + spacing.md, backgroundColor: themeColors.surface, borderTopColor: themeColors.border }]}>
+          <View style={styles.actionButtons}>
+            {/* Place Bid - only show if auction is active (not ended) and user is not owner */}
+            {isAuction && !hasEnded && !isOwner && (
               <TouchableOpacity
-                style={[styles.actionButton, styles.bidButton]}
+                style={[styles.actionButton, styles.bidButton, { backgroundColor: themeColors.accent }, hasOffers && { flex: 1 }]}
                 onPress={handlePlaceBid}
               >
-                <Feather name="trending-up" size={18} color={colors.white} />
+                <Feather name="trending-up" size={18} color="#ffffff" />
                 <Text style={styles.bidButtonText}>Place Bid</Text>
               </TouchableOpacity>
-
-              {listing.listing_type === 'auction_buy_now' && listing.buy_now_price && (
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.buyNowButton]}
-                  onPress={handleBuyNow}
-                >
-                  <Feather name="zap" size={18} color={colors.primary} />
-                  <View>
-                    <Text style={styles.buyNowLabel}>Buy Now</Text>
-                    <Text style={styles.buyNowPrice}>
-                      {formatCurrency(listing.buy_now_price)}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              )}
-            </View>
-          ) : (
-            <View style={styles.actionButtons}>
-              {listing.accept_offers && (
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.offerButton]}
-                  onPress={handleMakeOffer}
-                >
-                  <Feather name="message-square" size={18} color={colors.primary} />
-                  <Text style={styles.offerButtonText}>Make Offer</Text>
-                </TouchableOpacity>
-              )}
-
+            )}
+            {/* Make Offer - show if listing accepts offers and is not sold/cancelled and user is not owner */}
+            {canMakeOffer && (
               <TouchableOpacity
-                style={[styles.actionButton, styles.bidButton]}
-                onPress={handleBuyNow}
+                style={[
+                  styles.actionButton,
+                  // If auction ended but offers still available, make it the primary button
+                  (isAuction && !hasEnded)
+                    ? [styles.offerButton, { backgroundColor: themeColors.surface, borderColor: themeColors.primary }]
+                    : [styles.bidButton, { backgroundColor: themeColors.accent }],
+                  (isAuction && !hasEnded) && { flex: 1 }
+                ]}
+                onPress={handleMakeOffer}
               >
-                <Feather name="shopping-cart" size={18} color={colors.white} />
-                <Text style={styles.bidButtonText}>Buy Now</Text>
+                <Feather name="message-square" size={18} color={(isAuction && !hasEnded) ? themeColors.primary : "#ffffff"} />
+                <Text style={(isAuction && !hasEnded) ? [styles.offerButtonText, { color: themeColors.primary }] : styles.bidButtonText}>
+                  Make An Offer
+                </Text>
               </TouchableOpacity>
-            </View>
-          )}
+            )}
+            {/* Relist - only show for owner when auction ended but not sold */}
+            {canRelist && (
+              <TouchableOpacity
+                style={[styles.actionButton, styles.bidButton, { backgroundColor: themeColors.accent }]}
+                onPress={handleRelist}
+              >
+                <Feather name="refresh-cw" size={18} color="#ffffff" />
+                <Text style={styles.bidButtonText}>Edit & Relist</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       )}
 
@@ -893,6 +915,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     alignItems: 'center',
+  },
+  soldBadge: {
+    // Additional styles for sold items
   },
   endedBadgeText: {
     backgroundColor: 'rgba(0,0,0,0.7)',
@@ -1180,14 +1205,25 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: spacing.md,
   },
+  termsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: spacing.lg,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+  },
+  termsScrollContainer: {
+    maxHeight: 200,
+    marginTop: spacing.sm,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+  },
   terms: {
     fontSize: fontSize.base,
     color: colors.textSecondary,
     lineHeight: 24,
-    backgroundColor: colors.sand,
     padding: spacing.lg,
-    borderRadius: borderRadius.lg,
-    overflow: 'hidden',
   },
   actionBar: {
     position: 'absolute',
@@ -1221,20 +1257,6 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: fontSize.base,
     fontWeight: fontWeight.semibold,
-  },
-  buyNowButton: {
-    backgroundColor: colors.white,
-    borderWidth: 2,
-    borderColor: colors.primary,
-  },
-  buyNowLabel: {
-    fontSize: fontSize.xs,
-    color: colors.textMuted,
-  },
-  buyNowPrice: {
-    fontSize: fontSize.base,
-    fontWeight: fontWeight.bold,
-    color: colors.primary,
   },
   offerButton: {
     backgroundColor: colors.white,

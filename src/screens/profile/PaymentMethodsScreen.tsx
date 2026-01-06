@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
@@ -32,12 +33,15 @@ interface PaymentMethod {
 const mockPaymentMethods: PaymentMethod[] = [];
 
 export default function PaymentMethodsScreen() {
+  const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const { profile } = useAuth();
   const { colors, isDark } = useTheme();
 
   const [isLoading, setIsLoading] = useState(false);
   const [paymentMethods] = useState<PaymentMethod[]>(mockPaymentMethods);
+
+  const hasWireInstructions = profile?.wire_bank_name && profile?.wire_routing_number && profile?.wire_account_number;
 
   const handleAddCard = async () => {
     lightTap();
@@ -217,6 +221,53 @@ export default function PaymentMethodsScreen() {
           </View>
         </View>
       </View>
+
+      {/* Wire Transfer Instructions - only for sellers */}
+      {profile?.is_seller && (
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Wire Transfer Instructions</Text>
+          <View style={[styles.wireCard, { backgroundColor: isDark ? colors.sand : '#ffffff' }]}>
+            <View style={styles.wireHeader}>
+              <View style={[styles.wireIcon, { backgroundColor: hasWireInstructions ? colors.successLight : colors.warningLight }]}>
+                <Feather
+                  name={hasWireInstructions ? 'check-circle' : 'alert-circle'}
+                  size={20}
+                  color={hasWireInstructions ? colors.success : colors.warning}
+                />
+              </View>
+              <View style={styles.wireInfo}>
+                <Text style={[styles.wireTitle, { color: colors.textPrimary }]}>
+                  {hasWireInstructions ? 'Wire Instructions Set Up' : 'Wire Instructions Not Set'}
+                </Text>
+                <Text style={[styles.wireSubtitle, { color: colors.textMuted }]}>
+                  {hasWireInstructions
+                    ? `${profile.wire_bank_name} •••• ${profile.wire_account_number?.slice(-4)}`
+                    : 'Add your bank details to receive wire payments'}
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[styles.wireButton, { backgroundColor: hasWireInstructions ? 'transparent' : colors.accent, borderColor: colors.accent }]}
+              onPress={() => {
+                lightTap();
+                navigation.navigate('WireInstructions');
+              }}
+            >
+              <Feather
+                name={hasWireInstructions ? 'edit-2' : 'plus'}
+                size={16}
+                color={hasWireInstructions ? colors.accent : '#ffffff'}
+              />
+              <Text style={[styles.wireButtonText, { color: hasWireInstructions ? colors.accent : '#ffffff' }]}>
+                {hasWireInstructions ? 'Edit Instructions' : 'Set Up Wire Instructions'}
+              </Text>
+            </TouchableOpacity>
+            <Text style={[styles.wireNote, { color: colors.textLight }]}>
+              Wire transfers are irrevocable and ideal for high-value B2B transactions.
+            </Text>
+          </View>
+        </View>
+      )}
 
       {/* Seller Payouts Section - only for sellers */}
       {profile?.is_seller && (
@@ -488,5 +539,53 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: fontSize.sm,
     fontWeight: fontWeight.semibold,
+  },
+  wireCard: {
+    borderRadius: borderRadius.xl,
+    padding: spacing.lg,
+    ...shadows.sm,
+  },
+  wireHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+  },
+  wireIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  wireInfo: {
+    flex: 1,
+  },
+  wireTitle: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.semibold,
+    marginBottom: spacing.xs,
+  },
+  wireSubtitle: {
+    fontSize: fontSize.sm,
+    lineHeight: 20,
+  },
+  wireButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+  },
+  wireButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+  },
+  wireNote: {
+    fontSize: fontSize.xs,
+    textAlign: 'center',
+    marginTop: spacing.md,
   },
 });

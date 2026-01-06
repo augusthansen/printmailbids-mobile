@@ -2,14 +2,14 @@
 // Generated from MOBILE_APP_HANDOFF.md schema
 
 // Enums
-export type ListingType = 'auction' | 'fixed_price' | 'fixed_price_offers' | 'auction_buy_now';
+export type ListingType = 'auction' | 'make_offer' | 'auction_with_offers';
 export type ListingStatus = 'draft' | 'scheduled' | 'active' | 'ended' | 'sold' | 'cancelled' | 'expired';
 export type EquipmentStatus = 'in_production' | 'installed_idle' | 'needs_deinstall' | 'deinstalled' | 'broken_down' | 'palletized' | 'crated';
 export type DeinstallResponsibility = 'buyer' | 'seller_included' | 'seller_additional_fee';
 export type OnsiteAssistance = 'full_assistance' | 'forklift_available' | 'limited_assistance' | 'no_assistance';
 export type BidStatus = 'active' | 'outbid' | 'winning' | 'won' | 'lost' | 'cancelled';
 export type OfferStatus = 'pending' | 'accepted' | 'declined' | 'countered' | 'expired' | 'withdrawn';
-export type InvoiceStatus = 'pending' | 'paid' | 'partial' | 'overdue' | 'cancelled' | 'refunded';
+export type InvoiceStatus = 'pending' | 'awaiting_wire' | 'paid' | 'partial' | 'overdue' | 'cancelled' | 'refunded';
 export type FulfillmentStatus = 'awaiting_payment' | 'paid' | 'packaging' | 'ready_for_pickup' | 'shipped' | 'delivered' | 'completed' | 'disputed';
 export type PaymentMethod = 'credit_card' | 'ach' | 'wire' | 'check' | 'escrow';
 export type DeliveryCondition = 'good' | 'damaged' | 'partial';
@@ -17,7 +17,7 @@ export type DeliveryCondition = 'good' | 'damaged' | 'partial';
 export type NotificationType =
   | 'outbid' | 'auction_ending_soon' | 'auction_won' | 'auction_ended'
   | 'new_bid' | 'reserve_met' | 'auction_ending'
-  | 'new_offer' | 'offer_accepted' | 'offer_declined' | 'offer_countered' | 'offer_expired' | 'offer_response_needed'
+  | 'new_offer' | 'offer_accepted' | 'offer_declined' | 'offer_countered' | 'offer_expired' | 'offer_withdrawn' | 'offer_response_needed'
   | 'payment_reminder' | 'payment_received' | 'payment_confirmed'
   | 'item_shipped' | 'item_delivered' | 'shipping_quote_received' | 'shipping_quote_requested'
   | 'fees_added' | 'fees_approved' | 'fees_rejected'
@@ -66,6 +66,15 @@ export interface Profile {
   // Custom Commission
   custom_buyer_premium_percent: number | null;
   custom_seller_commission_percent: number | null;
+
+  // Wire Transfer Instructions (for sellers)
+  wire_bank_name: string | null;
+  wire_routing_number: string | null;
+  wire_account_number: string | null;
+  wire_account_name: string | null;
+  wire_bank_address: string | null;
+  wire_swift_code: string | null;
+  wire_additional_instructions: string | null;
 
   created_at: string;
   updated_at: string;
@@ -289,6 +298,12 @@ export interface Invoice {
   seller_notes: string | null;
   buyer_notes: string | null;
   internal_notes: string | null;
+
+  // Wire Transfer
+  wire_initiated_at: string | null;
+  wire_reference_number: string | null;
+  wire_confirmed_at: string | null;
+  wire_confirmed_by: string | null;
 
   created_at: string;
   updated_at: string;

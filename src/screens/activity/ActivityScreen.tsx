@@ -6,6 +6,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 
 interface ActivityStats {
@@ -28,6 +29,7 @@ export default function ActivityScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { user, profile } = useAuth();
+  const { colors: themeColors, isDark } = useTheme();
 
   const { data: stats } = useQuery<ActivityStats>({
     queryKey: ['activityStats', user?.id],
@@ -101,7 +103,7 @@ export default function ActivityScreen() {
       key={item.screen}
       style={[
         styles.menuItem,
-        !isLast && styles.menuItemBorder,
+        !isLast && { ...styles.menuItemBorder, borderBottomColor: themeColors.border },
       ]}
       onPress={() => navigation.navigate(item.screen as never)}
     >
@@ -109,53 +111,53 @@ export default function ActivityScreen() {
         <Feather name={item.icon} size={20} color={colors.accent} />
       </View>
       <View style={styles.menuItemContent}>
-        <Text style={styles.menuItemTitle}>{item.title}</Text>
-        <Text style={styles.menuItemSubtitle}>{item.subtitle}</Text>
+        <Text style={[styles.menuItemTitle, { color: themeColors.textPrimary }]}>{item.title}</Text>
+        <Text style={[styles.menuItemSubtitle, { color: themeColors.textMuted }]}>{item.subtitle}</Text>
       </View>
       {item.badge ? (
         <View style={[styles.badge, item.badgeColor && { backgroundColor: item.badgeColor }]}>
           <Text style={styles.badgeText}>{item.badge}</Text>
         </View>
       ) : (
-        <Feather name="chevron-right" size={20} color={colors.textLight} />
+        <Feather name="chevron-right" size={20} color={themeColors.textMuted} />
       )}
     </TouchableOpacity>
   );
 
   return (
     <ScrollView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: themeColors.background }]}
       contentContainerStyle={{ paddingBottom: insets.bottom + spacing['3xl'] }}
     >
       {/* Quick Stats */}
       <View style={styles.statsContainer}>
-        <View style={styles.statCard}>
+        <View style={[styles.statCard, { backgroundColor: themeColors.surface }]}>
           <View style={[styles.statIcon, { backgroundColor: colors.accentFaint }]}>
             <Feather name="trending-up" size={20} color={colors.accent} />
           </View>
-          <Text style={styles.statValue}>{stats?.activeBids || 0}</Text>
-          <Text style={styles.statLabel}>Active Bids</Text>
+          <Text style={[styles.statValue, { color: themeColors.textPrimary }]}>{stats?.activeBids || 0}</Text>
+          <Text style={[styles.statLabel, { color: themeColors.textMuted }]}>Active Bids</Text>
         </View>
-        <View style={styles.statCard}>
+        <View style={[styles.statCard, { backgroundColor: themeColors.surface }]}>
           <View style={[styles.statIcon, { backgroundColor: colors.successLight }]}>
             <Feather name="check-circle" size={20} color={colors.success} />
           </View>
-          <Text style={styles.statValue}>{stats?.wonAuctions || 0}</Text>
-          <Text style={styles.statLabel}>Won</Text>
+          <Text style={[styles.statValue, { color: themeColors.textPrimary }]}>{stats?.wonAuctions || 0}</Text>
+          <Text style={[styles.statLabel, { color: themeColors.textMuted }]}>Won</Text>
         </View>
-        <View style={styles.statCard}>
+        <View style={[styles.statCard, { backgroundColor: themeColors.surface }]}>
           <View style={[styles.statIcon, { backgroundColor: colors.warningLight }]}>
             <Feather name="clock" size={20} color={colors.warning} />
           </View>
-          <Text style={styles.statValue}>{stats?.pendingOffers || 0}</Text>
-          <Text style={styles.statLabel}>Pending</Text>
+          <Text style={[styles.statValue, { color: themeColors.textPrimary }]}>{stats?.pendingOffers || 0}</Text>
+          <Text style={[styles.statLabel, { color: themeColors.textMuted }]}>Pending</Text>
         </View>
       </View>
 
       {/* Buying Section */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Buying</Text>
-        <View style={styles.menuCard}>
+        <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Buying</Text>
+        <View style={[styles.menuCard, { backgroundColor: themeColors.surface }]}>
           {buyingItems.map((item, index) =>
             renderMenuItem(item, index, index === buyingItems.length - 1)
           )}
@@ -165,8 +167,8 @@ export default function ActivityScreen() {
       {/* Selling Section */}
       {sellingItems.length > 0 && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Selling</Text>
-          <View style={styles.menuCard}>
+          <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Selling</Text>
+          <View style={[styles.menuCard, { backgroundColor: themeColors.surface }]}>
             {sellingItems.map((item, index) =>
               renderMenuItem(item, index, index === sellingItems.length - 1)
             )}
@@ -177,13 +179,13 @@ export default function ActivityScreen() {
       {/* Become a Seller CTA */}
       {!profile?.is_seller && (
         <View style={styles.section}>
-          <View style={styles.sellerCta}>
+          <View style={[styles.sellerCta, { backgroundColor: themeColors.surface }]}>
             <View style={styles.sellerCtaIcon}>
               <Feather name="package" size={28} color={colors.accent} />
             </View>
             <View style={styles.sellerCtaContent}>
-              <Text style={styles.sellerCtaTitle}>Start Selling</Text>
-              <Text style={styles.sellerCtaSubtitle}>
+              <Text style={[styles.sellerCtaTitle, { color: themeColors.textPrimary }]}>Start Selling</Text>
+              <Text style={[styles.sellerCtaSubtitle, { color: themeColors.textMuted }]}>
                 List your equipment and reach thousands of buyers
               </Text>
             </View>

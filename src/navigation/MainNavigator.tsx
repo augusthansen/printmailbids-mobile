@@ -48,6 +48,8 @@ import AdminAnalyticsScreen from '../screens/admin/AdminAnalyticsScreen';
 import AdminSettingsScreen from '../screens/admin/AdminSettingsScreen';
 import SettingsScreen from '../screens/settings/SettingsScreen';
 import SellerDashboardScreen from '../screens/seller/SellerDashboardScreen';
+import WireInstructionsScreen from '../screens/profile/WireInstructionsScreen';
+import CheckoutScreen from '../screens/checkout/CheckoutScreen';
 
 // Create navigators
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -205,7 +207,8 @@ function DashboardStackNavigator() {
       <DashboardStack.Screen name="SellerOffers" component={MyOffersScreen} options={{ title: 'Offers Received' }} />
       <DashboardStack.Screen name="InvoiceDetail" component={InvoiceDetailScreen} options={{ title: 'Invoice Details' }} />
       <DashboardStack.Screen name="ListingDetail" component={ListingDetailScreen} options={{ headerShown: false }} />
-      <DashboardStack.Screen name="Checkout" component={PlaceholderScreen} options={{ title: 'Checkout', presentation: 'modal' }} />
+      <DashboardStack.Screen name="MakeOffer" component={MakeOfferScreen} options={{ title: 'Counter Offer', presentation: 'modal' }} />
+      <DashboardStack.Screen name="Checkout" component={CheckoutScreen} options={{ title: 'Checkout', presentation: 'modal' }} />
       <DashboardStack.Screen name="CreateListing" component={PlaceholderScreen} options={{ title: 'Create Listing', presentation: 'modal' }} />
       <DashboardStack.Screen name="EditListing" component={EditListingScreen} options={{ title: 'Edit Listing' }} />
     </DashboardStack.Navigator>
@@ -244,6 +247,7 @@ function ProfileStackNavigator() {
       <ProfileStack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifications' }} />
       <ProfileStack.Screen name="NotificationSettings" component={NotificationSettingsScreen} options={{ title: 'Notification Settings' }} />
       <ProfileStack.Screen name="PaymentMethods" component={PaymentMethodsScreen} options={{ title: 'Payment Methods' }} />
+      <ProfileStack.Screen name="WireInstructions" component={WireInstructionsScreen} options={{ title: 'Wire Instructions' }} />
       <ProfileStack.Screen name="SellerDashboard" component={SellerDashboardScreen} options={{ title: 'Seller Analytics' }} />
       <ProfileStack.Screen name="MyListings" component={MyListingsScreen} options={{ title: 'My Listings' }} />
       <ProfileStack.Screen name="MySales" component={MySalesScreen} options={{ title: 'My Sales' }} />

@@ -26,6 +26,7 @@ interface BuyerStats {
   activeBids: number;
   winningBids: number;
   pendingOffers: number;
+  acceptedOffers: number;  // Offers accepted but not yet paid
   unpaidInvoices: number;
   totalPurchases: number;
   pipelineValue: number;
@@ -38,6 +39,9 @@ interface SellerStats {
   totalRevenue: number;
   pendingPayouts: number;
   totalViews: number;
+  activeTransactions: number;  // All non-completed transactions
+  activeTransactionsAmount: number;
+  awaitingPayment: number;  // Specifically unpaid invoices
 }
 
 interface RecentActivity {
@@ -100,21 +104,27 @@ export default function DashboardScreen() {
   const { data: buyerStats, isLoading: loadingBuyer, refetch: refetchBuyer } = useQuery<BuyerStats>({
     queryKey: ['buyerStats', user?.id],
     queryFn: async () => {
-      if (!user) return { activeBids: 0, winningBids: 0, pendingOffers: 0, unpaidInvoices: 0, totalPurchases: 0, pipelineValue: 0 };
+      if (!user) return { activeBids: 0, winningBids: 0, pendingOffers: 0, acceptedOffers: 0, unpaidInvoices: 0, totalPurchases: 0, pipelineValue: 0 };
 
-      const [bidsResult, offersResult, invoicesResult, paidInvoicesResult] = await Promise.all([
+      const [bidsResult, pendingOffersResult, acceptedOffersResult, invoicesResult, paidInvoicesResult] = await Promise.all([
         // Active and winning bids
         supabase
           .from('bids')
           .select('id, status, amount')
           .eq('bidder_id', user.id)
           .in('status', ['active', 'winning']),
-        // Pending offers
+        // Pending offers (awaiting seller response)
         supabase
           .from('offers')
           .select('id', { count: 'exact', head: true })
           .eq('buyer_id', user.id)
           .eq('status', 'pending'),
+        // Accepted offers (need to pay!)
+        supabase
+          .from('offers')
+          .select('id, amount, listing:listings(title)')
+          .eq('buyer_id', user.id)
+          .eq('status', 'accepted'),
         // Unpaid invoices
         supabase
           .from('invoices')
@@ -138,7 +148,8 @@ export default function DashboardScreen() {
       return {
         activeBids,
         winningBids,
-        pendingOffers: offersResult.count || 0,
+        pendingOffers: pendingOffersResult.count || 0,
+        acceptedOffers: acceptedOffersResult.data?.length || 0,
         unpaidInvoices: unpaidInvoices.length,
         totalPurchases: paidInvoicesResult.count || 0,
         pipelineValue,
@@ -151,7 +162,7 @@ export default function DashboardScreen() {
   const { data: sellerStats, isLoading: loadingSeller, refetch: refetchSeller } = useQuery<SellerStats>({
     queryKey: ['sellerStats', user?.id],
     queryFn: async () => {
-      if (!user) return { activeListings: 0, totalSales: 0, pendingOffers: 0, totalRevenue: 0, pendingPayouts: 0, totalViews: 0 };
+      if (!user) return { activeListings: 0, totalSales: 0, pendingOffers: 0, totalRevenue: 0, pendingPayouts: 0, totalViews: 0, activeTransactions: 0, activeTransactionsAmount: 0, awaitingPayment: 0 };
 
       const [listingsResult, salesResult, offersResult, viewsResult] = await Promise.all([
         // Active listings
@@ -160,10 +171,10 @@ export default function DashboardScreen() {
           .select('id', { count: 'exact', head: true })
           .eq('seller_id', user.id)
           .eq('status', 'active'),
-        // Completed sales
+        // All invoices (for completed sales and pending transactions)
         supabase
           .from('invoices')
-          .select('id, seller_payout_amount, status')
+          .select('id, seller_payout_amount, total_amount, status, fulfillment_status, delivery_confirmed_at')
           .eq('seller_id', user.id),
         // Pending offers received
         supabase
@@ -180,10 +191,25 @@ export default function DashboardScreen() {
 
       const sales = salesResult.data || [];
       const paidSales = sales.filter(s => s.status === 'paid');
+
+      // Active transactions = any invoice not yet completed (includes unpaid AND in-progress fulfillment)
+      // Completed = fulfillment_status is 'completed' or 'delivered' with delivery confirmed
+      const activeSales = sales.filter(s =>
+        !['completed', 'delivered'].includes(s.fulfillment_status) ||
+        (s.fulfillment_status === 'delivered' && !s.delivery_confirmed_at)
+      );
+
+      // Awaiting payment = unpaid invoices specifically
+      const awaitingPaymentSales = sales.filter(s =>
+        s.status === 'pending' ||
+        s.status === 'awaiting_wire' ||
+        s.status === 'partial' ||
+        s.status === 'overdue'
+      );
+
       const totalRevenue = paidSales.reduce((sum, s) => sum + (s.seller_payout_amount || 0), 0);
-      const pendingPayouts = sales
-        .filter(s => s.status === 'pending')
-        .reduce((sum, s) => sum + (s.seller_payout_amount || 0), 0);
+      const pendingPayouts = awaitingPaymentSales.reduce((sum, s) => sum + (s.seller_payout_amount || 0), 0);
+      const pendingTransactionsAmount = activeSales.reduce((sum, s) => sum + (s.total_amount || 0), 0);
       const totalViews = (viewsResult.data || []).reduce((sum, l) => sum + (l.view_count || 0), 0);
 
       return {
@@ -193,6 +219,9 @@ export default function DashboardScreen() {
         totalRevenue,
         pendingPayouts,
         totalViews,
+        activeTransactions: activeSales.length,
+        activeTransactionsAmount: pendingTransactionsAmount,
+        awaitingPayment: awaitingPaymentSales.length,
       };
     },
     enabled: !!user && (!!profile?.is_seller || !!profile?.is_admin),
@@ -215,7 +244,7 @@ export default function DashboardScreen() {
       // Get recent offers
       const { data: offers } = await supabase
         .from('offers')
-        .select('id, amount, status, created_at, listing:listings(title)')
+        .select('id, amount, status, created_at, buyer_id, seller_id, listing:listings(title)')
         .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
         .order('created_at', { ascending: false })
         .limit(3);
@@ -307,15 +336,45 @@ export default function DashboardScreen() {
       markReadMutation.mutate(notification.id);
     }
 
-    // Navigate based on notification type - stay within Dashboard tab stack
-    if (notification.listing_id) {
-      navigation.navigate('ListingDetail', { listingId: notification.listing_id });
+    // Navigate based on notification type - check specific types first, then fall back to IDs
+    const offerTypes: NotificationType[] = ['new_offer', 'offer_accepted', 'offer_declined', 'offer_countered', 'offer_expired', 'offer_withdrawn', 'offer_response_needed'];
+    const bidTypes: NotificationType[] = ['outbid', 'auction_won', 'new_bid', 'auction_ending_soon', 'auction_ending'];
+    const invoiceTypes: NotificationType[] = ['payment_reminder', 'payment_received', 'payment_confirmed', 'item_shipped', 'item_delivered'];
+
+    if (offerTypes.includes(notification.type)) {
+      // For offer_accepted with invoice_id, go directly to invoice for payment
+      if (notification.type === 'offer_accepted' && notification.invoice_id) {
+        navigation.navigate('InvoiceDetail', { invoiceId: notification.invoice_id });
+        return;
+      }
+
+      // For other offer notifications, determine the appropriate view and filter
+      // new_offer = seller received a new offer
+      // offer_countered = other party countered your offer
+      // offer_declined/withdrawn/expired = response to your offer
+      const sellerReceivedTypes: NotificationType[] = ['new_offer'];
+      const isSellerNotification = sellerReceivedTypes.includes(notification.type);
+
+      navigation.navigate('MyOffers', {
+        viewMode: isSellerNotification ? 'received' : 'sent',
+        filter: notification.type === 'offer_accepted' ? 'accepted' : 'pending',
+      });
+    } else if (invoiceTypes.includes(notification.type) && notification.invoice_id) {
+      navigation.navigate('InvoiceDetail', { invoiceId: notification.invoice_id });
+    } else if (bidTypes.includes(notification.type)) {
+      if (notification.listing_id) {
+        navigation.navigate('ListingDetail', { listingId: notification.listing_id });
+      } else {
+        navigation.navigate('MyBids');
+      }
     } else if (notification.invoice_id) {
       navigation.navigate('InvoiceDetail', { invoiceId: notification.invoice_id });
     } else if (notification.offer_id) {
       navigation.navigate('MyOffers');
     } else if (notification.bid_id) {
       navigation.navigate('MyBids');
+    } else if (notification.listing_id) {
+      navigation.navigate('ListingDetail', { listingId: notification.listing_id });
     }
   };
 
@@ -486,6 +545,137 @@ export default function DashboardScreen() {
         </View>
       )}
 
+      {/* Seller Section (if seller or admin) - FIRST for sellers */}
+      {(profile?.is_seller || profile?.is_admin) && (
+        <>
+          {/* ACTIVE TRANSACTIONS ALERT - Invoices awaiting buyer payment */}
+          {(sellerStats?.activeTransactions || 0) > 0 && (
+            <TouchableOpacity
+              style={[styles.pendingTransactionsBanner, { backgroundColor: themeColors.success }]}
+              onPress={() => navigateTo('MySales')}
+              activeOpacity={0.8}
+            >
+              <View style={styles.pendingTransactionsIconContainer}>
+                <Feather name="clock" size={32} color="#ffffff" />
+              </View>
+              <View style={styles.pendingTransactionsContent}>
+                <Text style={styles.pendingTransactionsTitle}>
+                  {sellerStats?.activeTransactions === 1 ? 'Active Transaction' : `${sellerStats?.activeTransactions} Active Transactions`}
+                </Text>
+                <Text style={styles.pendingTransactionsSubtitle}>
+                  {sellerStats?.awaitingPayment
+                    ? `${sellerStats.awaitingPayment} awaiting payment`
+                    : 'In progress'} • {formatCurrency(sellerStats?.activeTransactionsAmount || 0)}
+                </Text>
+              </View>
+              <View style={styles.pendingTransactionsArrow}>
+                <Feather name="arrow-right" size={24} color="#ffffff" />
+              </View>
+            </TouchableOpacity>
+          )}
+
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Selling Activity</Text>
+            <View style={styles.statsGrid}>
+              <StatCard
+                icon="package"
+                iconColor={themeColors.accent}
+                iconBg={themeColors.accentFaint}
+                value={sellerStats?.activeListings || 0}
+                label="Active Listings"
+                onPress={() => navigateTo('MyListings')}
+              />
+              <StatCard
+                icon="inbox"
+                iconColor={themeColors.warning}
+                iconBg={themeColors.warningLight}
+                value={sellerStats?.pendingOffers || 0}
+                label="Pending Offers"
+                onPress={() => {
+                  lightTap();
+                  navigation.navigate('SellerOffers', { viewMode: 'received' });
+                }}
+              />
+              <StatCard
+                icon="dollar-sign"
+                iconColor={themeColors.success}
+                iconBg={themeColors.successLight}
+                value={sellerStats?.totalSales || 0}
+                label="Total Sales"
+                onPress={() => navigateTo('MySales')}
+              />
+            </View>
+          </View>
+
+          {/* Seller Revenue Card */}
+          <View style={styles.revenueCard}>
+            <View style={styles.revenueRow}>
+              <View>
+                <Text style={styles.revenueLabel}>Total Revenue</Text>
+                <Text style={styles.revenueValue}>{formatCurrency(sellerStats?.totalRevenue || 0)}</Text>
+              </View>
+              <View style={styles.revenueRight}>
+                <Text style={styles.pendingLabel}>Pending Payouts</Text>
+                <Text style={styles.pendingValue}>{formatCurrency(sellerStats?.pendingPayouts || 0)}</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Seller Actions */}
+          <View style={styles.section}>
+            <View style={[styles.menuCard, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}>
+              <ActionCard
+                icon="package"
+                title="My Listings"
+                subtitle="Manage your listings"
+                onPress={() => navigateTo('MyListings')}
+              />
+              <View style={[styles.divider, { borderBottomColor: themeColors.borderLight }]} />
+              <ActionCard
+                icon="dollar-sign"
+                title="Sales"
+                subtitle="View your sales history"
+                onPress={() => navigateTo('MySales')}
+              />
+            </View>
+          </View>
+
+          {/* Create Listing CTA */}
+          <TouchableOpacity
+            style={[styles.createListingButton, { backgroundColor: themeColors.accent }]}
+            onPress={() => navigateTo('CreateListing')}
+            activeOpacity={0.8}
+          >
+            <Feather name="plus" size={20} color="#ffffff" />
+            <Text style={styles.createListingText}>Create New Listing</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {/* UNPAID INVOICES ALERT - Most prominent when there are invoices to pay */}
+      {(buyerStats?.unpaidInvoices || 0) > 0 && (
+        <TouchableOpacity
+          style={[styles.acceptedOffersBanner, { backgroundColor: themeColors.success }]}
+          onPress={() => navigateTo('MyInvoices')}
+          activeOpacity={0.8}
+        >
+          <View style={styles.acceptedOffersIconContainer}>
+            <Feather name="check-circle" size={32} color="#ffffff" />
+          </View>
+          <View style={styles.acceptedOffersContent}>
+            <Text style={styles.acceptedOffersTitle}>
+              {buyerStats?.unpaidInvoices === 1 ? 'Invoice Ready!' : `${buyerStats?.unpaidInvoices} Invoices Ready!`}
+            </Text>
+            <Text style={styles.acceptedOffersSubtitle}>
+              Tap here to view and complete payment • {formatCurrency(buyerStats?.pipelineValue || 0)}
+            </Text>
+          </View>
+          <View style={styles.acceptedOffersArrow}>
+            <Feather name="arrow-right" size={24} color="#ffffff" />
+          </View>
+        </TouchableOpacity>
+      )}
+
       {/* Buyer Stats */}
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Buying Activity</Text>
@@ -517,27 +707,6 @@ export default function DashboardScreen() {
         </View>
       </View>
 
-      {/* Pipeline Alert */}
-      {(buyerStats?.unpaidInvoices || 0) > 0 && (
-        <TouchableOpacity
-          style={[styles.alertCard, { backgroundColor: themeColors.errorLight, borderColor: themeColors.error }]}
-          onPress={() => navigateTo('MyInvoices')}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.alertIconContainer, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}>
-            <Feather name="alert-circle" size={20} color={themeColors.error} />
-          </View>
-          <View style={styles.alertContent}>
-            <Text style={[styles.alertTitle, { color: themeColors.error }]}>
-              {buyerStats?.unpaidInvoices} unpaid {buyerStats?.unpaidInvoices === 1 ? 'invoice' : 'invoices'}
-            </Text>
-            <Text style={[styles.alertSubtitle, { color: themeColors.error }]}>
-              Total: {formatCurrency(buyerStats?.pipelineValue || 0)}
-            </Text>
-          </View>
-          <Feather name="chevron-right" size={20} color={themeColors.error} />
-        </TouchableOpacity>
-      )}
 
       {/* Buyer Actions */}
       <View style={styles.section}>
@@ -569,96 +738,17 @@ export default function DashboardScreen() {
         </View>
       </View>
 
-      {/* Seller Section (if seller or admin) */}
-      {(profile?.is_seller || profile?.is_admin) && (
-        <>
-          <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Selling Activity</Text>
-            <View style={styles.statsGrid}>
-              <StatCard
-                icon="package"
-                iconColor={themeColors.accent}
-                iconBg={themeColors.accentFaint}
-                value={sellerStats?.activeListings || 0}
-                label="Active Listings"
-                onPress={() => navigateTo('MyListings')}
-              />
-              <StatCard
-                icon="dollar-sign"
-                iconColor={themeColors.success}
-                iconBg={themeColors.successLight}
-                value={sellerStats?.totalSales || 0}
-                label="Total Sales"
-                onPress={() => navigateTo('MySales')}
-              />
-              <StatCard
-                icon="eye"
-                iconColor={themeColors.steel}
-                iconBg={themeColors.sand}
-                value={sellerStats?.totalViews || 0}
-                label="Views"
-              />
-            </View>
-          </View>
-
-          {/* Seller Revenue Card */}
-          <View style={styles.revenueCard}>
-            <View style={styles.revenueRow}>
-              <View>
-                <Text style={styles.revenueLabel}>Total Revenue</Text>
-                <Text style={styles.revenueValue}>{formatCurrency(sellerStats?.totalRevenue || 0)}</Text>
-              </View>
-              <View style={styles.revenueRight}>
-                <Text style={styles.pendingLabel}>Pending Payouts</Text>
-                <Text style={styles.pendingValue}>{formatCurrency(sellerStats?.pendingPayouts || 0)}</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Seller Actions */}
-          <View style={styles.section}>
-            <View style={[styles.menuCard, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}>
-              <ActionCard
-                icon="package"
-                title="My Listings"
-                subtitle="Manage your listings"
-                onPress={() => navigateTo('MyListings')}
-              />
-              <View style={[styles.divider, { borderBottomColor: themeColors.borderLight }]} />
-              <ActionCard
-                icon="inbox"
-                title="Offers Received"
-                subtitle={sellerStats?.pendingOffers ? `${sellerStats.pendingOffers} pending` : 'View offers on your items'}
-                badge={sellerStats?.pendingOffers}
-                badgeColor={themeColors.success}
-                onPress={() => navigateTo('SellerOffers')}
-              />
-              <View style={[styles.divider, { borderBottomColor: themeColors.borderLight }]} />
-              <ActionCard
-                icon="dollar-sign"
-                title="Sales"
-                subtitle="View your sales history"
-                onPress={() => navigateTo('MySales')}
-              />
-            </View>
-          </View>
-
-          {/* Create Listing CTA */}
-          <TouchableOpacity
-            style={[styles.createListingButton, { backgroundColor: themeColors.accent }]}
-            onPress={() => navigateTo('CreateListing')}
-            activeOpacity={0.8}
-          >
-            <Feather name="plus" size={20} color="#ffffff" />
-            <Text style={styles.createListingText}>Create New Listing</Text>
-          </TouchableOpacity>
-        </>
-      )}
-
       {/* Become a Seller CTA (hide for sellers and admins) */}
       {!profile?.is_seller && !profile?.is_admin && (
         <View style={styles.section}>
-          <View style={[styles.sellerCta, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}>
+          <TouchableOpacity
+            style={[styles.sellerCta, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}
+            onPress={() => {
+              lightTap();
+              navigation.navigate('ProfileTab', { screen: 'EditProfile' });
+            }}
+            activeOpacity={0.7}
+          >
             <View style={[styles.sellerCtaIcon, { backgroundColor: themeColors.accentFaint }]}>
               <Feather name="package" size={28} color={themeColors.accent} />
             </View>
@@ -668,10 +758,11 @@ export default function DashboardScreen() {
                 List your equipment and reach thousands of buyers
               </Text>
             </View>
-            <TouchableOpacity style={[styles.sellerCtaButton, { backgroundColor: themeColors.accent }]}>
-              <Text style={styles.sellerCtaButtonText}>Learn More</Text>
-            </TouchableOpacity>
-          </View>
+            <View style={[styles.sellerCtaButton, { backgroundColor: themeColors.accent }]}>
+              <Text style={styles.sellerCtaButtonText}>Get Started</Text>
+              <Feather name="arrow-right" size={16} color="#ffffff" />
+            </View>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -1164,6 +1255,9 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   sellerCtaButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
     backgroundColor: colors.accent,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.xl,
@@ -1282,5 +1376,85 @@ const styles = StyleSheet.create({
     fontSize: fontSize.base,
     marginTop: spacing.sm,
     textAlign: 'center',
+  },
+  // Accepted Offers Banner - prominent CTA
+  acceptedOffersBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.xl,
+    padding: spacing.lg,
+    borderRadius: borderRadius.xl,
+    ...shadows.lg,
+  },
+  acceptedOffersIconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.lg,
+  },
+  acceptedOffersContent: {
+    flex: 1,
+  },
+  acceptedOffersTitle: {
+    fontSize: fontSize.xl,
+    fontWeight: fontWeight.bold,
+    color: '#ffffff',
+  },
+  acceptedOffersSubtitle: {
+    fontSize: fontSize.sm,
+    color: 'rgba(255, 255, 255, 0.9)',
+    marginTop: spacing.xs,
+  },
+  acceptedOffersArrow: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // Pending Transactions Banner - for sellers
+  pendingTransactionsBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.xl,
+    padding: spacing.lg,
+    borderRadius: borderRadius.xl,
+    ...shadows.lg,
+  },
+  pendingTransactionsIconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.lg,
+  },
+  pendingTransactionsContent: {
+    flex: 1,
+  },
+  pendingTransactionsTitle: {
+    fontSize: fontSize.xl,
+    fontWeight: fontWeight.bold,
+    color: '#ffffff',
+  },
+  pendingTransactionsSubtitle: {
+    fontSize: fontSize.sm,
+    color: 'rgba(255, 255, 255, 0.9)',
+    marginTop: spacing.xs,
+  },
+  pendingTransactionsArrow: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });

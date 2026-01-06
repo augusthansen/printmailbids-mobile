@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 import { formatCurrency, formatRelativeTime } from '../../utils/formatters';
 import { lightTap, successFeedback, errorFeedback } from '../../utils/haptics';
@@ -53,6 +54,7 @@ type FilterType = 'all' | 'pending' | 'accepted' | 'declined' | 'expired';
 export default function AdminOffersScreen() {
   const insets = useSafeAreaInsets();
   const { profile } = useAuth();
+  const { colors: themeColors, isDark } = useTheme();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterType>('all');
@@ -136,13 +138,21 @@ export default function AdminOffersScreen() {
 
   const FilterButton = ({ type, label }: { type: FilterType; label: string }) => (
     <TouchableOpacity
-      style={[styles.filterButton, filter === type && styles.filterButtonActive]}
+      style={[
+        styles.filterButton,
+        { backgroundColor: themeColors.surface },
+        filter === type && { backgroundColor: themeColors.accent }
+      ]}
       onPress={() => {
         lightTap();
         setFilter(type);
       }}
     >
-      <Text style={[styles.filterButtonText, filter === type && styles.filterButtonTextActive]}>
+      <Text style={[
+        styles.filterButtonText,
+        { color: themeColors.textSecondary },
+        filter === type && { color: colors.white }
+      ]}>
         {label}
       </Text>
     </TouchableOpacity>
@@ -155,7 +165,7 @@ export default function AdminOffersScreen() {
     const isExpired = new Date(item.expires_at) < new Date() && item.status === 'pending';
 
     return (
-      <View style={styles.offerCard}>
+      <View style={[styles.offerCard, { backgroundColor: themeColors.surface }]}>
         <View style={styles.offerHeader}>
           <Image
             source={imageUrl || require('../../../assets/placeholder.png')}
@@ -163,7 +173,7 @@ export default function AdminOffersScreen() {
             contentFit="cover"
           />
           <View style={styles.offerInfo}>
-            <Text style={styles.listingTitle} numberOfLines={2}>
+            <Text style={[styles.listingTitle, { color: themeColors.textPrimary }]} numberOfLines={2}>
               {item.listing?.title || 'Unknown Listing'}
             </Text>
             <View style={[styles.statusBadge, { backgroundColor: isExpired ? colors.textMuted : getStatusColor(item.status) }]}>
@@ -172,57 +182,57 @@ export default function AdminOffersScreen() {
           </View>
         </View>
 
-        <View style={styles.amountRow}>
+        <View style={[styles.amountRow, { borderTopColor: themeColors.border }]}>
           <View>
-            <Text style={styles.amountLabel}>Offer Amount</Text>
-            <Text style={styles.offerAmount}>{formatCurrency(item.amount)}</Text>
+            <Text style={[styles.amountLabel, { color: themeColors.textMuted }]}>Offer Amount</Text>
+            <Text style={[styles.offerAmount, { color: themeColors.accent }]}>{formatCurrency(item.amount)}</Text>
             {listingPrice > 0 && (
-              <Text style={[styles.percentText, percentOfAsk < 80 && styles.lowOffer]}>
+              <Text style={[styles.percentText, { color: themeColors.textMuted }, percentOfAsk < 80 && styles.lowOffer]}>
                 {percentOfAsk}% of asking ({formatCurrency(listingPrice)})
               </Text>
             )}
           </View>
           {item.counter_amount && (
             <View style={styles.counterInfo}>
-              <Text style={styles.amountLabel}>Counter</Text>
-              <Text style={styles.counterAmount}>{formatCurrency(item.counter_amount)}</Text>
-              <Text style={styles.counterCount}>({item.counter_count} rounds)</Text>
+              <Text style={[styles.amountLabel, { color: themeColors.textMuted }]}>Counter</Text>
+              <Text style={[styles.counterAmount, { color: themeColors.textPrimary }]}>{formatCurrency(item.counter_amount)}</Text>
+              <Text style={[styles.counterCount, { color: themeColors.textMuted }]}>({item.counter_count} rounds)</Text>
             </View>
           )}
         </View>
 
-        <View style={styles.partiesRow}>
+        <View style={[styles.partiesRow, { borderTopColor: themeColors.border }]}>
           <View style={styles.partyInfo}>
-            <Text style={styles.partyLabel}>Buyer</Text>
-            <Text style={styles.partyName}>
+            <Text style={[styles.partyLabel, { color: themeColors.textMuted }]}>Buyer</Text>
+            <Text style={[styles.partyName, { color: themeColors.textPrimary }]}>
               {item.buyer?.company_name || item.buyer?.full_name || 'Unknown'}
             </Text>
           </View>
-          <Feather name="arrow-right" size={16} color={colors.textLight} />
+          <Feather name="arrow-right" size={16} color={themeColors.textMuted} />
           <View style={[styles.partyInfo, styles.partyInfoRight]}>
-            <Text style={styles.partyLabel}>Seller</Text>
-            <Text style={styles.partyName}>
+            <Text style={[styles.partyLabel, { color: themeColors.textMuted }]}>Seller</Text>
+            <Text style={[styles.partyName, { color: themeColors.textPrimary }]}>
               {item.seller?.company_name || item.seller?.full_name || 'Unknown'}
             </Text>
           </View>
         </View>
 
         {item.message && (
-          <View style={styles.messageBox}>
-            <Feather name="message-circle" size={14} color={colors.textMuted} />
-            <Text style={styles.messageText} numberOfLines={2}>{item.message}</Text>
+          <View style={[styles.messageBox, { backgroundColor: themeColors.inputBackground }]}>
+            <Feather name="message-circle" size={14} color={themeColors.textMuted} />
+            <Text style={[styles.messageText, { color: themeColors.textSecondary }]} numberOfLines={2}>{item.message}</Text>
           </View>
         )}
 
         <View style={styles.dateRow}>
-          <Text style={styles.dateText}>Created {formatRelativeTime(item.created_at)}</Text>
-          <Text style={styles.dateText}>
+          <Text style={[styles.dateText, { color: themeColors.textMuted }]}>Created {formatRelativeTime(item.created_at)}</Text>
+          <Text style={[styles.dateText, { color: themeColors.textMuted }]}>
             Expires {formatRelativeTime(item.expires_at)}
           </Text>
         </View>
 
         {/* Actions */}
-        <View style={styles.actionRow}>
+        <View style={[styles.actionRow, { borderTopColor: themeColors.border }]}>
           {item.status === 'pending' && !isExpired && (
             <>
               <TouchableOpacity
@@ -257,36 +267,36 @@ export default function AdminOffersScreen() {
 
   if (!profile?.is_admin) {
     return (
-      <View style={styles.unauthorizedContainer}>
+      <View style={[styles.unauthorizedContainer, { backgroundColor: themeColors.background }]}>
         <Feather name="shield-off" size={48} color={colors.error} />
-        <Text style={styles.unauthorizedText}>Access Denied</Text>
+        <Text style={[styles.unauthorizedText, { color: themeColors.textMuted }]}>Access Denied</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchInputContainer}>
-          <Feather name="search" size={20} color={colors.textMuted} />
+      <View style={[styles.searchContainer, { backgroundColor: themeColors.surface, borderBottomColor: themeColors.border }]}>
+        <View style={[styles.searchInputContainer, { backgroundColor: themeColors.inputBackground }]}>
+          <Feather name="search" size={20} color={themeColors.textMuted} />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: themeColors.textPrimary }]}
             placeholder="Search offers..."
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={themeColors.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Feather name="x" size={20} color={colors.textMuted} />
+              <Feather name="x" size={20} color={themeColors.textMuted} />
             </TouchableOpacity>
           )}
         </View>
       </View>
 
       {/* Filters */}
-      <View style={styles.filterRow}>
+      <View style={[styles.filterRow, { backgroundColor: themeColors.surface, borderBottomColor: themeColors.border }]}>
         <FilterButton type="all" label="All" />
         <FilterButton type="pending" label="Pending" />
         <FilterButton type="accepted" label="Accepted" />
@@ -297,7 +307,7 @@ export default function AdminOffersScreen() {
       {/* Offers List */}
       {isLoading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.accent} />
+          <ActivityIndicator size="large" color={themeColors.accent} />
         </View>
       ) : (
         <FlatList
@@ -306,13 +316,13 @@ export default function AdminOffersScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + spacing.xl }]}
           refreshControl={
-            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.accent} />
+            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={themeColors.accent} />
           }
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Feather name="message-square" size={48} color={colors.textLight} />
-              <Text style={styles.emptyTitle}>No Offers Found</Text>
-              <Text style={styles.emptyText}>
+              <Feather name="message-square" size={48} color={themeColors.textMuted} />
+              <Text style={[styles.emptyTitle, { color: themeColors.textPrimary }]}>No Offers Found</Text>
+              <Text style={[styles.emptyText, { color: themeColors.textMuted }]}>
                 {searchQuery ? 'Try a different search term' : 'No offers match the current filter'}
               </Text>
             </View>
