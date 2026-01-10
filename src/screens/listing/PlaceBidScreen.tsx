@@ -554,8 +554,8 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
   };
 
   const handleQuickBid = (increment: number) => {
-    // If user has existing max bid, increase from that; otherwise from minimum
-    const baseAmount = userHasExistingBid ? userCurrentMaxBid : minimumBid;
+    // Only increase from existing max bid if user is winning; otherwise use minimum
+    const baseAmount = (userHasExistingBid && userIsWinning) ? userCurrentMaxBid : minimumBid;
     const incrementAmount = getBidIncrement(baseAmount);
     const newAmount = baseAmount + increment * incrementAmount;
     setMaxBidAmount(newAmount.toString());
@@ -730,10 +730,10 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
 
           {/* Quick Bid Buttons */}
           <Text style={[styles.quickBidLabel, { color: themeColors.textMuted }]}>
-            {userHasExistingBid ? 'Increase max bid by:' : 'Quick select:'}
+            {userHasExistingBid && userIsWinning ? 'Increase max bid by:' : 'Quick select:'}
           </Text>
           <View style={styles.quickBidButtons}>
-            {userHasExistingBid ? (
+            {userHasExistingBid && userIsWinning ? (
               <>
                 {/* When user has existing bid, show increase options from their current max */}
                 <TouchableOpacity
