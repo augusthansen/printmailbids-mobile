@@ -108,6 +108,17 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
     ? Math.max(userCurrentMaxBid + getBidIncrement(userCurrentMaxBid), minimumBid)
     : minimumBid;
 
+  // DEBUG: Log values to verify calculation
+  console.log('BID DEBUG:', {
+    currentPrice: listing?.current_price,
+    minimumBid,
+    userCurrentMaxBid,
+    userIsWinning,
+    userHasExistingBid,
+    requiredMinimum,
+    myBidStatus: listing?.my_bid?.status,
+  });
+
   // Check if reserve is met
   const reserveMet = !listing?.reserve_price ||
     (listing.current_price && listing.current_price >= listing.reserve_price);
