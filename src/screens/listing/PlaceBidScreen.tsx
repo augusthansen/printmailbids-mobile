@@ -614,7 +614,7 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
         >
           <Feather name="x" size={24} color={themeColors.textPrimary} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: themeColors.textPrimary }]} accessibilityRole="header">Place Bid</Text>
+        <Text style={[styles.headerTitle, { color: themeColors.textPrimary }]} accessibilityRole="header">Place Bid v2</Text>
         <View style={styles.headerSpacer} />
       </View>
 
