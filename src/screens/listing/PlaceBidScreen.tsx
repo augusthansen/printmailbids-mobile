@@ -712,10 +712,7 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
                 setMaxBidAmount(rawNumber);
               }}
               keyboardType="numeric"
-              placeholder={userHasExistingBid
-                ? (userCurrentMaxBid + getBidIncrement(userCurrentMaxBid)).toLocaleString()
-                : minimumBid.toLocaleString()
-              }
+              placeholder={requiredMinimum.toLocaleString()}
               placeholderTextColor={themeColors.textLight}
             />
           </View>
