@@ -12,7 +12,7 @@ import { Image } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, NavigationProp } from '@react-navigation/native';
-import { ActivityStackParamList } from '../../navigation/types';
+import { DashboardStackParamList } from '../../navigation/types';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -40,7 +40,7 @@ const FILTERS: { key: FilterType; label: string }[] = [
 ];
 
 export default function MyBidsScreen() {
-  const navigation = useNavigation<NavigationProp<ActivityStackParamList>>();
+  const navigation = useNavigation<NavigationProp<DashboardStackParamList>>();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { colors: themeColors, isDark } = useTheme();
@@ -138,7 +138,7 @@ export default function MyBidsScreen() {
             <View style={styles.bidRow}>
               <Text style={[styles.bidLabel, { color: themeColors.textMuted }]}>Current:</Text>
               <Text style={[styles.currentBid, { color: themeColors.accent }]}>
-                {formatCurrency(item.listing.current_bid || item.listing.starting_price || 0)}
+                {formatCurrency(item.listing.current_price || item.listing.starting_price || 0)}
               </Text>
             </View>
 

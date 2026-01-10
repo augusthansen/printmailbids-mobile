@@ -10,7 +10,6 @@ import {
   TextInput,
   Alert,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -20,6 +19,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 import { formatRelativeTime } from '../../utils/formatters';
 import { lightTap, successFeedback, errorFeedback } from '../../utils/haptics';
+import Avatar from '../../components/Avatar';
 
 interface User {
   id: string;
@@ -190,11 +190,7 @@ export default function AdminUsersScreen() {
   const renderUser = ({ item }: { item: User }) => (
     <View style={[styles.userCard, { backgroundColor: themeColors.surface }]}>
       <View style={styles.userHeader}>
-        <Image
-          source={item.avatar_url ? { uri: item.avatar_url } : require('../../../assets/avatar-placeholder.png')}
-          style={styles.avatar}
-          contentFit="cover"
-        />
+        <Avatar url={item.avatar_url} size="md" />
         <View style={styles.userInfo}>
           <Text style={[styles.userName, { color: themeColors.textPrimary }]} numberOfLines={1}>
             {item.full_name || item.company_name || 'No name'}
@@ -432,6 +428,7 @@ const styles = StyleSheet.create({
   userHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    gap: spacing.md,
   },
   avatar: {
     width: 50,

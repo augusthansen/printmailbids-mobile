@@ -10,7 +10,6 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -22,6 +21,7 @@ import { MessagesStackParamList } from '../../navigation/types';
 import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { lightTap, successFeedback } from '../../utils/haptics';
+import Avatar from '../../components/Avatar';
 
 type Props = NativeStackScreenProps<MessagesStackParamList, 'Conversation'>;
 
@@ -152,14 +152,9 @@ export default function ConversationScreen({ route, navigation }: Props) {
     }
   }, [conversation, navigation]);
 
-  // Scroll to bottom when new messages arrive
-  useEffect(() => {
-    if (conversation?.messages.length) {
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-    }
-  }, [conversation?.messages.length]);
+  // With inverted FlatList, scrollToOffset(0) goes to newest message (visually at bottom)
+  // We only scroll when sending a new message, not on every data change
+  // The inverted list automatically shows newest at bottom
 
   const renderMessage = useCallback(({ item, index }: { item: MessageWithSender; index: number }) => {
     const isOwnMessage = item.sender_id === user?.id;
@@ -176,13 +171,7 @@ export default function ConversationScreen({ route, navigation }: Props) {
         {!isOwnMessage && (
           <View style={styles.avatarContainer}>
             {showAvatar ? (
-              item.sender?.avatar_url ? (
-                <Image source={{ uri: item.sender.avatar_url }} style={styles.avatar} />
-              ) : (
-                <View style={[styles.avatarPlaceholder, { backgroundColor: themeColors.sand }]}>
-                  <Feather name="user" size={14} color={themeColors.textMuted} />
-                </View>
-              )
+              <Avatar url={item.sender?.avatar_url} size="xs" />
             ) : (
               <View style={styles.avatarSpacer} />
             )}
@@ -193,17 +182,17 @@ export default function ConversationScreen({ route, navigation }: Props) {
           styles.messageBubble,
           isOwnMessage
             ? [styles.ownBubble, { backgroundColor: themeColors.accent }]
-            : [styles.otherBubble, { backgroundColor: themeColors.surface }],
+            : [styles.otherBubble, { backgroundColor: themeColors.sand }],
         ]}>
           <Text style={[
             styles.messageText,
-            isOwnMessage ? styles.ownMessageText : { color: themeColors.textPrimary },
+            { color: isOwnMessage ? '#ffffff' : themeColors.textPrimary },
           ]}>
             {item.content}
           </Text>
           <Text style={[
             styles.messageTime,
-            isOwnMessage ? styles.ownMessageTime : { color: themeColors.textLight },
+            { color: isOwnMessage ? 'rgba(255,255,255,0.7)' : themeColors.textMuted },
           ]}>
             {new Date(item.created_at).toLocaleTimeString([], {
               hour: '2-digit',
@@ -230,26 +219,26 @@ export default function ConversationScreen({ route, navigation }: Props) {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
       {/* Listing Context */}
-      {conversation?.listing && (
+      {conversation?.listing ? (
         <View style={[styles.listingContext, { backgroundColor: isDark ? themeColors.sand : themeColors.accentFaint, borderBottomColor: themeColors.border }]}>
           <Feather name="package" size={16} color={themeColors.accent} />
           <Text style={[styles.listingTitle, { color: themeColors.accent }]} numberOfLines={1}>
             Re: {conversation.listing.title}
           </Text>
         </View>
-      )}
+      ) : null}
 
-      {/* Messages List */}
+      {/* Messages List - inverted so newest at bottom, data reversed so newest renders first */}
       <FlatList
         ref={flatListRef}
-        data={conversation?.messages || []}
+        data={[...(conversation?.messages || [])].reverse()}
         renderItem={renderMessage}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={[
-          styles.messagesList,
-          { paddingBottom: insets.bottom + 70 },
-        ]}
+        contentContainerStyle={[styles.messagesList, { paddingTop: spacing.lg }]}
         showsVerticalScrollIndicator={false}
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
+        inverted
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Feather name="message-circle" size={48} color={themeColors.textLight} />
@@ -262,7 +251,7 @@ export default function ConversationScreen({ route, navigation }: Props) {
       />
 
       {/* Input Bar */}
-      <View style={[styles.inputBar, { paddingBottom: insets.bottom + spacing.md, backgroundColor: themeColors.surface, borderTopColor: themeColors.border }]}>
+      <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, spacing.md), backgroundColor: themeColors.surface, borderTopColor: themeColors.border }]}>
         <View style={styles.inputContainer}>
           <TextInput
             style={[styles.input, { backgroundColor: themeColors.sand, color: themeColors.textPrimary }]}
@@ -277,7 +266,7 @@ export default function ConversationScreen({ route, navigation }: Props) {
             style={[
               styles.sendButton,
               { backgroundColor: themeColors.accent },
-              (!messageText.trim() || sendMessageMutation.isPending) && styles.sendButtonDisabled,
+              (!messageText.trim() || sendMessageMutation.isPending) ? styles.sendButtonDisabled : undefined,
             ]}
             onPress={handleSend}
             disabled={!messageText.trim() || sendMessageMutation.isPending}
@@ -408,13 +397,10 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   inputBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
     backgroundColor: colors.white,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
+    paddingBottom: spacing.md,
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },

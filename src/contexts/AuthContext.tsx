@@ -9,10 +9,13 @@ interface AuthContextType {
   profile: Profile | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  needsOnboarding: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  completeOnboarding: () => Promise<void>;
+  skipOnboarding: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -69,36 +72,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Initialize auth state
   useEffect(() => {
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
-      // Handle invalid refresh token error
-      if (error) {
-        console.error('Session error:', error.message);
-        // Clear invalid session data
-        if (error.message?.includes('Refresh Token') || error.message?.includes('Invalid')) {
-          console.log('Invalid refresh token detected, clearing session...');
-          supabase.auth.signOut();
+    const initializeAuth = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+
+        // Handle invalid refresh token error
+        if (error) {
+          console.error('Session error:', error.message);
+          // Clear invalid session data
+          if (error.message?.includes('Refresh Token') || error.message?.includes('Invalid')) {
+            console.log('Invalid refresh token detected, clearing session...');
+            supabase.auth.signOut();
+          }
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+          setIsLoading(false);
+          return;
         }
+
+        setSession(session);
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          await fetchProfile(session.user.id);
+        }
+        setIsLoading(false);
+      } catch (error) {
+        // Catch any unexpected errors during session retrieval
+        console.error('Unexpected session error:', error);
         setSession(null);
         setUser(null);
         setProfile(null);
         setIsLoading(false);
-        return;
       }
+    };
 
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id);
-      }
-      setIsLoading(false);
-    }).catch((error) => {
-      // Catch any unexpected errors during session retrieval
-      console.error('Unexpected session error:', error);
-      setSession(null);
-      setUser(null);
-      setProfile(null);
-      setIsLoading(false);
-    });
+    initializeAuth();
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -167,16 +176,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const completeOnboarding = async () => {
+    if (user) {
+      await supabase
+        .from('profiles')
+        .update({ onboarding_completed: true, onboarding_skipped: false })
+        .eq('id', user.id);
+      await fetchProfile(user.id);
+    }
+  };
+
+  const skipOnboarding = async () => {
+    if (user) {
+      await supabase
+        .from('profiles')
+        .update({ onboarding_skipped: true })
+        .eq('id', user.id);
+      await fetchProfile(user.id);
+    }
+  };
+
+  // Determine if user needs onboarding:
+  // - Has a profile
+  // - Hasn't completed onboarding
+  // - Hasn't skipped onboarding
+  // Note: We show onboarding even if full_name is set from signup,
+  // to allow users to upload avatar and verify phone
+  const needsOnboarding = !!(
+    profile &&
+    !profile.onboarding_completed &&
+    !profile.onboarding_skipped
+  );
+
   const value: AuthContextType = {
     session,
     user,
     profile,
     isLoading,
     isAuthenticated: !!session,
+    needsOnboarding,
     signIn,
     signUp,
     signOut,
     refreshProfile,
+    completeOnboarding,
+    skipOnboarding,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

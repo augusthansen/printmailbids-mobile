@@ -70,14 +70,20 @@ export default function MySalesScreen() {
   });
 
   const filteredSales = sales?.filter(sale => {
-    // "All" shows active transactions only (excludes completed/delivered)
-    if (filter === 'all') return !['delivered', 'completed'].includes(sale.fulfillment_status);
+    // Exclude cancelled/expired/refunded from all views except when explicitly viewing history
+    const isTerminated = ['cancelled', 'expired', 'refunded'].includes(sale.status);
+    // A transaction is complete when fulfillment_status is 'completed' OR delivery_confirmed_at is set
+    const isComplete = sale.fulfillment_status === 'completed' || !!sale.delivery_confirmed_at;
+
+    // "All" shows active transactions only (excludes completed and terminated)
+    if (filter === 'all') return !isComplete && !isTerminated;
     // Awaiting Payment = any unpaid status (pending, awaiting_wire, partial, overdue)
-    if (filter === 'pending') return ['pending', 'awaiting_wire', 'partial', 'overdue'].includes(sale.status);
+    if (filter === 'pending') return ['pending', 'awaiting_wire', 'partial', 'overdue'].includes(sale.status) && !isTerminated;
     if (filter === 'processing') return sale.status === 'paid' &&
       ['paid', 'packaging', 'ready_for_pickup'].includes(sale.fulfillment_status);
-    if (filter === 'shipped') return sale.fulfillment_status === 'shipped';
-    if (filter === 'completed') return ['delivered', 'completed'].includes(sale.fulfillment_status);
+    if (filter === 'shipped') return sale.fulfillment_status === 'shipped' ||
+      (sale.fulfillment_status === 'delivered' && !sale.delivery_confirmed_at);
+    if (filter === 'completed') return isComplete;
     return true;
   }) || [];
 

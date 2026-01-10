@@ -1,6 +1,5 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
-import { Image } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -8,6 +7,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { mediumTap } from '../../utils/haptics';
+import Avatar from '../../components/Avatar';
 
 type MenuItem = {
   label: string;
@@ -60,6 +60,7 @@ export default function ProfileScreen() {
         { label: 'Seller Analytics', screen: 'SellerDashboard', icon: 'bar-chart-2' as const },
         { label: 'My Listings', screen: 'MyListings', icon: 'package' as const },
         { label: 'Create Listing', screen: 'CreateListing', icon: 'plus-circle' as const },
+        { label: 'Seller Settings', screen: 'SellerSettings', icon: 'sliders' as const },
       ],
     }] : [] as MenuSection[]),
     ...(profile?.is_admin ? [{
@@ -84,13 +85,11 @@ export default function ProfileScreen() {
       {/* Profile Header */}
       <View style={[styles.header, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}>
         <View style={styles.avatarContainer}>
-          <Image
-            source={profile?.avatar_url ? { uri: profile.avatar_url } : require('../../../assets/avatar-placeholder.png')}
-            style={styles.avatar}
-            contentFit="cover"
-            placeholder={require('../../../assets/avatar-placeholder.png')}
-          />
-          <TouchableOpacity style={[styles.editAvatarButton, { backgroundColor: themeColors.accent }]}>
+          <Avatar url={profile?.avatar_url} size="lg" />
+          <TouchableOpacity
+            style={[styles.editAvatarButton, { backgroundColor: themeColors.accent }]}
+            onPress={() => navigation.navigate('EditProfile' as never)}
+          >
             <Feather name="camera" size={14} color="#ffffff" />
           </TouchableOpacity>
         </View>
@@ -185,12 +184,6 @@ const styles = StyleSheet.create({
     position: 'relative',
     marginBottom: spacing.lg,
   },
-  avatar: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: colors.sand,
-  },
   editAvatarButton: {
     position: 'absolute',
     bottom: 0,
@@ -273,7 +266,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
     marginLeft: spacing.xs,
   },
   menuCard: {

@@ -22,7 +22,7 @@ export type HomeStackParamList = {
   Search: { query?: string; categoryId?: string };
   ListingDetail: { listingId: string };
   PlaceBid: { listingId: string };
-  MakeOffer: { listingId: string };
+  MakeOffer: { listingId: string; parentOfferId?: string; suggestedAmount?: number };
   SellerProfile: { sellerId: string };
 };
 
@@ -30,6 +30,8 @@ export type HomeStackParamList = {
 export type WatchlistStackParamList = {
   Watchlist: undefined;
   ListingDetail: { listingId: string };
+  PlaceBid: { listingId: string };
+  MakeOffer: { listingId: string; parentOfferId?: string; suggestedAmount?: number };
 };
 
 // Dashboard Stack
@@ -43,6 +45,7 @@ export type DashboardStackParamList = {
   SellerOffers: { viewMode?: 'sent' | 'received' } | undefined;
   InvoiceDetail: { invoiceId: string };
   ListingDetail: { listingId: string };
+  PlaceBid: { listingId: string };
   MakeOffer: { listingId: string; parentOfferId?: string; suggestedAmount?: number };
   Checkout: { invoiceId: string };
   CreateListing: undefined;
@@ -59,6 +62,8 @@ export type MessagesStackParamList = {
 export type ProfileStackParamList = {
   Profile: undefined;
   EditProfile: undefined;
+  PhoneVerification: undefined;
+  SellerSettings: undefined;
   Addresses: undefined;
   AddAddress: undefined;
   EditAddress: { addressId: string };

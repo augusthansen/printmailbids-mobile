@@ -3,11 +3,15 @@
     "name": "PrintMailBids",
     "slug": "printmailbids",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "scheme": "printmailbids",
+    "jsEngine": "hermes",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -22,6 +26,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.printmailbids.app",
       "buildNumber": "1",
+      "requireFullScreen": false,
       "infoPlist": {
         "NSCameraUsageDescription": "PrintMailBids uses your camera to take photos of equipment you want to sell.",
         "NSPhotoLibraryUsageDescription": "PrintMailBids accesses your photo library to upload images of equipment listings.",
@@ -96,7 +101,10 @@
     },
     "owner": "printmailbids",
     "updates": {
-      "enabled": false
+      "enabled": true,
+      "url": "https://u.expo.dev/YOUR_EAS_PROJECT_ID",
+      "fallbackToCacheTimeout": 0,
+      "checkAutomatically": "ON_LOAD"
     }
   }
 }

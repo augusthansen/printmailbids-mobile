@@ -482,7 +482,7 @@ export default function CheckoutScreen() {
                 <View style={styles.referenceContent}>
                   <Text style={[styles.referenceTitle, { color: themeColors.warning }]}>Important: Include Reference</Text>
                   <Text style={[styles.referenceText, { color: themeColors.warning }]}>
-                    Include invoice number <Text style={fontWeight.bold}>#{invoice.invoice_number}</Text> in the wire transfer memo/reference field.
+                    Include invoice number <Text style={{ fontWeight: '700' }}>#{invoice.invoice_number}</Text> in the wire transfer memo/reference field.
                   </Text>
                 </View>
               </View>
@@ -579,7 +579,7 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.semibold,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
     marginLeft: spacing.xs,
   },
   itemCard: {

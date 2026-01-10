@@ -26,7 +26,9 @@ export const BID_INCREMENTS = [
   { maxBid: 250, increment: 1 },
   { maxBid: 1000, increment: 10 },
   { maxBid: 10000, increment: 50 },
-  { maxBid: Infinity, increment: 100 },
+  { maxBid: 50000, increment: 100 },
+  { maxBid: 100000, increment: 250 },
+  { maxBid: Infinity, increment: 1000 },
 ] as const;
 
 export function getBidIncrement(currentBid: number): number {
@@ -35,7 +37,7 @@ export function getBidIncrement(currentBid: number): number {
       return increment;
     }
   }
-  return 100;
+  return 1000;
 }
 
 export function getMinNextBid(currentBid: number): number {

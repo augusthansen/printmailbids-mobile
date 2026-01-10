@@ -11,6 +11,9 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { ProfileStackParamList } from '../../navigation/types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { supabase } from '../../lib/supabase';
@@ -24,7 +27,10 @@ interface NotificationPreferences {
   notify_sms: boolean;
 }
 
+type NavigationProp = NativeStackNavigationProp<ProfileStackParamList>;
+
 export default function NotificationSettingsScreen() {
+  const navigation = useNavigation<NavigationProp>();
   const insets = useSafeAreaInsets();
   const { profile, refreshProfile } = useAuth();
   const { colors, isDark } = useTheme();
@@ -138,12 +144,24 @@ export default function NotificationSettingsScreen() {
           )}
         </View>
         {!profile?.phone_verified && (
-          <View style={[styles.hintCard, { backgroundColor: colors.warningLight }]}>
-            <Feather name="info" size={16} color={colors.warning} />
-            <Text style={[styles.hintText, { color: colors.warning }]}>
-              Verify your phone number to enable SMS notifications
-            </Text>
-          </View>
+          <TouchableOpacity
+            style={[styles.hintCard, { backgroundColor: colors.accentFaint, borderColor: colors.accent }]}
+            onPress={() => {
+              mediumTap();
+              navigation.navigate('PhoneVerification');
+            }}
+          >
+            <Feather name="smartphone" size={16} color={colors.accent} />
+            <View style={styles.hintContent}>
+              <Text style={[styles.hintTitle, { color: colors.accent }]}>
+                Verify your phone number
+              </Text>
+              <Text style={[styles.hintText, { color: colors.textSecondary }]}>
+                Required to enable SMS notifications
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color={colors.accent} />
+          </TouchableOpacity>
         )}
       </View>
 
@@ -262,7 +280,7 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.semibold,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
     marginLeft: spacing.xs,
   },
   sectionHint: {
@@ -311,14 +329,22 @@ const styles = StyleSheet.create({
   hintCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: spacing.md,
     marginTop: spacing.sm,
     padding: spacing.md,
     borderRadius: borderRadius.lg,
+    borderWidth: 1,
+  },
+  hintContent: {
+    flex: 1,
+  },
+  hintTitle: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
   },
   hintText: {
-    flex: 1,
     fontSize: fontSize.xs,
+    marginTop: 2,
   },
   typeRow: {
     flexDirection: 'row',

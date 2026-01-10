@@ -46,7 +46,7 @@ export default function WatchlistScreen() {
   const renderItem = ({ item }: { item: ListingWithImages }) => {
     const primaryImage = item.images?.find(img => img.is_primary) || item.images?.[0];
     const isAuction = item.listing_type === 'auction' || item.listing_type === 'auction_with_offers';
-    const price = isAuction ? item.current_bid || item.starting_price : item.fixed_price;
+    const price = isAuction ? item.current_price || item.starting_price : item.fixed_price;
 
     return (
       <TouchableOpacity

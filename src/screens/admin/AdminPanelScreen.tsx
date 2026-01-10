@@ -396,7 +396,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
     marginLeft: spacing.xs,
   },
   menuCard: {

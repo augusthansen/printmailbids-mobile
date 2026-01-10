@@ -45,6 +45,7 @@ const PIPELINE_STEPS = [
   { key: 'ready_for_pickup', label: 'Ready', icon: 'check-circle' },
   { key: 'shipped', label: 'Shipped', icon: 'truck' },
   { key: 'delivered', label: 'Delivered', icon: 'home' },
+  { key: 'completed', label: 'Complete', icon: 'check' },
 ] as const;
 
 export default function MyInvoicesScreen() {

@@ -711,3 +711,89 @@ const activeSales = sales.filter(s =>
 - Supabase migrations: `/Users/augusthansen/Documents/Programs/printmailbids/supabase/migrations`
 
 **Note**: Reference the web app for API patterns, component styles, database schema, and business logic. The web API endpoints support both cookie-based auth (web) and Bearer token auth (mobile).
+
+## App Store Submission Checklist
+
+### Before Submission
+1. **Replace EAS Project ID**: Update `YOUR_EAS_PROJECT_ID` in `app.json` after running `eas build:configure`
+2. **Configure Stripe Production Keys**: Replace test publishable key in `src/constants/config.ts`
+3. **App Icons**: Ensure all icon sizes are provided in `assets/` folder
+4. **Privacy Policy URL**: Required for App Store - add to app description
+5. **Screenshots**: Prepare 6.5" and 5.5" iPhone screenshots
+
+### EAS Build Commands
+```bash
+# Configure EAS for first time
+npx eas build:configure
+
+# Development build for testing
+npx eas build --platform ios --profile development
+
+# Production build for App Store
+npx eas build --platform ios --profile production
+
+# Submit to App Store
+npx eas submit --platform ios
+```
+
+### Apple App Store Requirements Met
+- ✅ Privacy Manifest (`NSPrivacyAccessedAPITypes`)
+- ✅ Encryption declaration (`ITSAppUsesNonExemptEncryption: false`)
+- ✅ Required permissions with usage descriptions
+- ✅ Dark mode support (`userInterfaceStyle: automatic`)
+- ✅ iPad support (`supportsTablet: true`)
+- ✅ Minimum touch target 44pt (Apple HIG)
+- ✅ Accessibility labels on interactive elements
+
+## Future Feature Recommendations
+
+### High Priority
+1. **Push Notifications**: Implement full push notification handling for bid updates, messages, and order status
+2. **Biometric Authentication**: Add Face ID/Touch ID for quick sign-in (plugin already configured)
+3. **Offline Support**: Cache listings and allow offline browsing with TanStack Query persistence
+4. **Search Screen**: Implement advanced search with filters (category, location, price range)
+
+### Medium Priority
+1. **Seller Profile Screen**: View seller ratings, past sales, and contact info
+2. **Image Zoom**: Add pinch-to-zoom in listing image gallery
+3. **Share Listings**: Deep link sharing to specific listings
+4. **Rate/Review System**: Allow buyers to rate sellers after completed transactions
+
+### Low Priority
+1. **Saved Searches**: Save search criteria for quick access
+2. **Price Alerts**: Notify when items in price range are listed
+3. **Bulk Actions**: Select multiple listings for batch operations (sellers)
+4. **Export Data**: Export purchase/sale history to CSV
+
+## Known Limitations
+
+### Current Placeholder Screens
+- **Advanced Search** (`HomeStack.Search`): Basic search available on Browse tab, advanced filters coming soon
+- **Seller Profile** (`HomeStack.SellerProfile`): Seller info shown in listing detail, dedicated profile page planned
+
+### Platform-Specific Notes
+- **Alert.prompt**: Only available on iOS - use Modal with TextInput for cross-platform
+- **Haptics**: Only work on physical devices, not simulators
+- **expo-image**: Requires `{ uri: url }` object format, not raw URL strings
+
+## Console Logging Strategy
+
+Current console statements are intentional for debugging during development. Before production:
+
+```bash
+# Find all console statements
+grep -rn "console\." src/ --include="*.tsx" --include="*.ts"
+```
+
+Consider implementing a logging service (e.g., Sentry, LogRocket) for production error tracking. Remove verbose debug logs but keep error logs for diagnostics.
+
+## Performance Optimizations Applied
+
+1. **TanStack Query**: Server state caching with 30-second refetch intervals
+2. **expo-image**: Optimized image loading with transitions and caching
+3. **useMemo/useCallback**: Applied to expensive computations and callbacks
+4. **FlatList**: Used for long lists with proper `keyExtractor`
+5. **Hermes Engine**: Enabled for improved JS performance
+
+## GitHub Repository
+- Repository: https://github.com/augusthansen/printmailbids-mobile

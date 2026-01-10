@@ -16,7 +16,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Notification, NotificationType } from '../../types/database';
-import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
+import { colors, spacing, borderRadius, fontSize, fontWeight, shadows, ThemeColors } from '../../constants/theme';
 import { formatRelativeTime } from '../../utils/formatters';
 import { lightTap } from '../../utils/haptics';
 
@@ -26,7 +26,7 @@ interface NotificationConfig {
   iconBg: string;
 }
 
-function getNotificationConfig(type: NotificationType, themeColors: typeof colors): NotificationConfig {
+function getNotificationConfig(type: NotificationType, themeColors: ThemeColors): NotificationConfig {
   switch (type) {
     case 'outbid':
       return { icon: 'trending-down', iconColor: themeColors.warning, iconBg: themeColors.warningLight };

@@ -38,6 +38,8 @@ export interface Profile {
   is_verified: boolean;
   verified_at: string | null;
   phone_verified: boolean;
+  phone_verified_at: string | null;
+  verified_phone: string | null;
 
   // Roles
   is_seller: boolean;
@@ -75,6 +77,10 @@ export interface Profile {
   wire_bank_address: string | null;
   wire_swift_code: string | null;
   wire_additional_instructions: string | null;
+
+  // Onboarding
+  onboarding_completed: boolean;
+  onboarding_skipped: boolean;
 
   created_at: string;
   updated_at: string;
@@ -122,7 +128,7 @@ export interface Listing {
   reserve_price: number | null;
   buy_now_price: number | null;
   fixed_price: number | null;
-  current_bid: number | null;
+  current_price: number | null;
   bid_count: number;
 
   // Make Offer
@@ -144,6 +150,31 @@ export interface Listing {
   hours_count: number | null;
   equipment_status: EquipmentStatus | null;
 
+  // Machine Specifications
+  software_version: string | null;
+  operating_system: string | null;
+  controller_type: string | null;
+  number_of_heads: number | null;
+  max_speed: string | null;
+  feeder_count: number | null;
+  output_stacker_count: number | null;
+  capabilities: string[] | null;
+  material_types: string | null;
+  max_material_width: string | null;
+  max_material_length: string | null;
+  material_weight: string | null;
+  power_requirements: string | null;
+  network_connectivity: string | null;
+  last_service_date: string | null;
+  included_accessories: string | null;
+  maintenance_history: string | null;
+
+  // N/A Flags
+  software_na: boolean;
+  configuration_na: boolean;
+  capabilities_na: boolean;
+  dimensions_na: boolean;
+
   // Dimensions & Specs
   weight_lbs: number | null;
   length_inches: number | null;
@@ -153,6 +184,9 @@ export interface Listing {
   floor_width_ft: number | null;
   electrical_requirements: string | null;
   air_requirements_psi: number | null;
+
+  // Video
+  video_url: string | null;
 
   // Logistics
   deinstall_responsibility: DeinstallResponsibility;

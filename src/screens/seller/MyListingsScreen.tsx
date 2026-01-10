@@ -151,7 +151,7 @@ export default function MyListingsScreen() {
     const isAuction = item.listing_type === 'auction' || item.listing_type === 'auction_with_offers';
 
     const displayPrice = isAuction
-      ? item.current_bid || item.starting_price
+      ? item.current_price || item.starting_price
       : item.fixed_price;
 
     return (
@@ -184,7 +184,7 @@ export default function MyListingsScreen() {
               {isAuction ? (
                 <>
                   <Text style={[styles.priceLabel, { color: themeColors.textMuted }]}>
-                    {item.current_bid ? 'Current Bid:' : 'Starting:'}
+                    {item.current_price ? 'Current Bid:' : 'Starting:'}
                   </Text>
                   <Text style={[styles.priceAmount, { color: themeColors.textPrimary }]}>
                     {formatCurrency(displayPrice || 0)}

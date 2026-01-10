@@ -22,6 +22,7 @@ import { DashboardStackParamList } from '../../navigation/types';
 import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 import { formatCurrency, formatRelativeTime } from '../../utils/formatters';
 import { lightTap, successFeedback, warningFeedback } from '../../utils/haptics';
+import { API_URL } from '../../constants/config';
 
 type ViewMode = 'sent' | 'received';
 type FilterType = 'all' | 'pending' | 'accepted' | 'declined' | 'countered' | 'expired' | 'withdrawn';
@@ -89,7 +90,7 @@ export default function MyOffersScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteProp<DashboardStackParamList, 'MyOffers'>>();
   const insets = useSafeAreaInsets();
-  const { user, profile } = useAuth();
+  const { user, profile, session } = useAuth();
   const { colors: themeColors, isDark } = useTheme();
   const queryClient = useQueryClient();
 
@@ -142,95 +143,30 @@ export default function MyOffersScreen() {
     enabled: !!user,
   });
 
-  // Accept offer mutation - creates invoice, marks listing sold, notifies both parties
+  // Accept offer mutation - uses API for proper commission handling
   const acceptMutation = useMutation({
     mutationFn: async (offer: OfferWithDetails) => {
-      // 1. Update offer status to accepted
-      const { error } = await supabase
-        .from('offers')
-        .update({
-          status: 'accepted',
-          responded_at: new Date().toISOString(),
-        })
-        .eq('id', offer.id);
+      if (!session) throw new Error('Not authenticated');
 
-      if (error) throw error;
-
-      // 2. Create invoice with commission calculations
-      // Default rates: 8% buyer premium, 8% seller commission (matching web app)
-      const BUYER_PREMIUM_PERCENT = 8;
-      const SELLER_COMMISSION_PERCENT = 8;
-
-      const saleAmount = offer.amount;
-      const buyerPremiumAmount = saleAmount * (BUYER_PREMIUM_PERCENT / 100);
-      const totalAmount = saleAmount + buyerPremiumAmount;
-      const sellerCommissionAmount = saleAmount * (SELLER_COMMISSION_PERCENT / 100);
-      const sellerPayoutAmount = saleAmount - sellerCommissionAmount;
-
-      const paymentDueDate = new Date();
-      paymentDueDate.setDate(paymentDueDate.getDate() + (offer.listing.payment_due_days || 7));
-
-      const { data: invoiceData, error: invoiceError } = await supabase
-        .from('invoices')
-        .insert({
-          listing_id: offer.listing_id,
-          seller_id: offer.seller_id,
-          buyer_id: offer.buyer_id,
-          sale_amount: saleAmount,
-          buyer_premium_percent: BUYER_PREMIUM_PERCENT,
-          buyer_premium_amount: buyerPremiumAmount,
-          total_amount: totalAmount,
-          seller_commission_percent: SELLER_COMMISSION_PERCENT,
-          seller_commission_amount: sellerCommissionAmount,
-          seller_payout_amount: sellerPayoutAmount,
-          status: 'pending',
-          fulfillment_status: 'awaiting_payment',
-          payment_due_date: paymentDueDate.toISOString().split('T')[0],
-        })
-        .select('id')
-        .single();
-
-      if (invoiceError) throw invoiceError;
-
-      // 3. Mark listing as sold
-      await supabase
-        .from('listings')
-        .update({ status: 'sold', updated_at: new Date().toISOString() })
-        .eq('id', offer.listing_id);
-
-      // 4. Decline any other pending offers on this listing
-      await supabase
-        .from('offers')
-        .update({ status: 'declined', responded_at: new Date().toISOString() })
-        .eq('listing_id', offer.listing_id)
-        .eq('status', 'pending')
-        .neq('id', offer.id);
-
-      // 5. Notify buyer that their offer was accepted (include invoice_id for direct navigation)
-      await supabase.from('notifications').insert({
-        user_id: offer.buyer_id,
-        type: 'offer_accepted',
-        title: 'Offer Accepted!',
-        body: `Your offer of ${formatCurrency(offer.amount)} for "${offer.listing.title}" has been accepted! Please proceed to payment.`,
-        listing_id: offer.listing_id,
-        offer_id: offer.id,
-        invoice_id: invoiceData.id,
+      const response = await fetch(`${API_URL}/offers/respond`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          offerId: offer.id,
+          action: 'accept',
+        }),
       });
 
-      // 6. Notify seller (current user) that they accepted
-      if (user) {
-        await supabase.from('notifications').insert({
-          user_id: offer.seller_id,
-          type: 'offer_accepted',
-          title: 'Offer Accepted',
-          body: `You accepted an offer of ${formatCurrency(offer.amount)} for "${offer.listing.title}".`,
-          listing_id: offer.listing_id,
-          offer_id: offer.id,
-        });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to accept offer');
       }
 
-      // Return invoice ID for navigation
-      return { invoiceId: invoiceData.id, isBuyer: user?.id === offer.buyer_id };
+      return { invoiceId: result.invoiceId, isBuyer: user?.id === offer.buyer_id };
     },
     onSuccess: (data) => {
       successFeedback();
@@ -265,29 +201,30 @@ export default function MyOffersScreen() {
     },
   });
 
-  // Decline offer mutation
+  // Decline offer mutation - uses API
   const declineMutation = useMutation({
     mutationFn: async (offer: OfferWithDetails) => {
-      const { error } = await supabase
-        .from('offers')
-        .update({
-          status: 'declined',
-          responded_at: new Date().toISOString(),
-        })
-        .eq('id', offer.id);
+      if (!session) throw new Error('Not authenticated');
 
-      if (error) throw error;
-
-      // Notify the buyer that their offer was declined
-      const { error: notifError } = await supabase.from('notifications').insert({
-        user_id: offer.buyer_id,
-        type: 'offer_declined',
-        title: 'Offer Declined',
-        body: `Your offer of ${formatCurrency(offer.amount)} for "${offer.listing.title}" was declined.`,
-        listing_id: offer.listing_id,
-        offer_id: offer.id,
+      const response = await fetch(`${API_URL}/offers/respond`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          offerId: offer.id,
+          action: 'decline',
+        }),
       });
 
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to decline offer');
+      }
+
+      return result;
     },
     onSuccess: () => {
       warningFeedback();
@@ -299,41 +236,29 @@ export default function MyOffersScreen() {
     },
   });
 
-  // Withdraw offer mutation
+  // Withdraw offer mutation - uses API
   const withdrawMutation = useMutation({
     mutationFn: async (offer: OfferWithDetails) => {
-      const { error } = await supabase
-        .from('offers')
-        .update({ status: 'withdrawn' })
-        .eq('id', offer.id);
+      if (!session) throw new Error('Not authenticated');
 
-      if (error) throw error;
-
-      // If this was a counter offer, restore the parent offer to pending
-      if (offer.parent_offer_id) {
-        const { error: restoreError } = await supabase
-          .from('offers')
-          .update({ status: 'pending', responded_at: null })
-          .eq('id', offer.parent_offer_id);
-
-      }
-
-      // Notify the other party that the offer was withdrawn
-      // If buyer withdrew, notify seller. If seller withdrew counter, notify buyer.
-      const notifyUserId = user?.id === offer.buyer_id ? offer.seller_id : offer.buyer_id;
-      const isCounter = !!offer.parent_offer_id;
-
-      const { error: notifError } = await supabase.from('notifications').insert({
-        user_id: notifyUserId,
-        type: 'offer_withdrawn',
-        title: isCounter ? 'Counter Offer Withdrawn' : 'Offer Withdrawn',
-        body: isCounter
-          ? `A counter offer of ${formatCurrency(offer.amount)} for "${offer.listing.title}" was withdrawn.`
-          : `An offer of ${formatCurrency(offer.amount)} for "${offer.listing.title}" was withdrawn.`,
-        listing_id: offer.listing_id,
-        offer_id: offer.id,
+      const response = await fetch(`${API_URL}/offers/withdraw`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          offerId: offer.id,
+        }),
       });
 
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to withdraw offer');
+      }
+
+      return result;
     },
     onSuccess: () => {
       warningFeedback();

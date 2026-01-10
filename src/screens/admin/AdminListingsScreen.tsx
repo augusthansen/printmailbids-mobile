@@ -29,7 +29,7 @@ interface Listing {
   listing_type: 'auction' | 'make_offer' | 'auction_with_offers';
   starting_price: number | null;
   fixed_price: number | null;
-  current_bid: number | null;
+  current_price: number | null;
   created_at: string;
   end_time: string | null;
   seller: {
@@ -150,7 +150,7 @@ export default function AdminListingsScreen() {
   );
 
   const renderListing = ({ item }: { item: Listing }) => {
-    const price = item.current_bid || item.fixed_price || item.starting_price || 0;
+    const price = item.current_price || item.fixed_price || item.starting_price || 0;
     const imageUrl = item.images?.[0]?.url;
 
     return (

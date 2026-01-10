@@ -54,8 +54,8 @@ export default function HomeScreen({ navigation }: Props) {
   const renderListing = useCallback(({ item }: { item: ListingWithImages }) => {
     const primaryImage = item.images?.find(img => img.is_primary) || item.images?.[0];
     const isAuction = item.listing_type === 'auction' || item.listing_type === 'auction_with_offers';
-    const price = isAuction ? item.current_bid || item.starting_price : item.fixed_price;
-    const hasReserve = item.reserve_price && (!item.current_bid || item.current_bid < item.reserve_price);
+    const price = isAuction ? item.current_price || item.starting_price : item.fixed_price;
+    const hasReserve = item.reserve_price && (!item.current_price || item.current_price < item.reserve_price);
 
     return (
       <Pressable
@@ -65,6 +65,10 @@ export default function HomeScreen({ navigation }: Props) {
           pressed && styles.listingCardPressed,
         ]}
         onPress={() => navigation.navigate('ListingDetail', { listingId: item.id })}
+        accessible={true}
+        accessibilityLabel={`${item.title}, ${isAuction ? 'Auction' : 'Buy Now'}, ${price ? formatCurrency(price) : 'No bids yet'}`}
+        accessibilityHint="Double tap to view listing details"
+        accessibilityRole="button"
       >
         <View style={styles.imageContainer}>
           <Image
@@ -155,14 +159,25 @@ export default function HomeScreen({ navigation }: Props) {
             onChangeText={setSearchQuery}
             onSubmitEditing={handleSearch}
             returnKeyType="search"
+            accessibilityLabel="Search equipment"
+            accessibilityHint="Enter keywords to search listings"
           />
           {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <TouchableOpacity
+              onPress={() => setSearchQuery('')}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityLabel="Clear search"
+              accessibilityRole="button"
+            >
               <Feather name="x" size={18} color={themeColors.textMuted} />
             </TouchableOpacity>
           )}
         </View>
-        <TouchableOpacity style={[styles.filterButton, { backgroundColor: isDark ? themeColors.sand : '#ffffff', borderColor: themeColors.border }]}>
+        <TouchableOpacity
+          style={[styles.filterButton, { backgroundColor: isDark ? themeColors.sand : '#ffffff', borderColor: themeColors.border }]}
+          accessibilityLabel="Filter listings"
+          accessibilityRole="button"
+        >
           <Feather name="sliders" size={18} color={themeColors.primary} />
         </TouchableOpacity>
       </View>

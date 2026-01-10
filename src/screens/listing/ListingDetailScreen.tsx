@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,12 +15,15 @@ import { Image } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect, CompositeScreenProps } from '@react-navigation/native';
+import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { ListingWithDetails, ListingImage } from '../../types/database';
-import { HomeStackParamList } from '../../navigation/types';
+import Avatar from '../../components/Avatar';
+import { HomeStackParamList, MainTabParamList } from '../../navigation/types';
 import {
   formatCurrency,
   formatTimeRemaining,
@@ -35,7 +38,10 @@ import { lightTap, mediumTap, successFeedback, errorFeedback } from '../../utils
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const IMAGE_HEIGHT = 320;
 
-type Props = NativeStackScreenProps<HomeStackParamList, 'ListingDetail'>;
+type Props = CompositeScreenProps<
+  NativeStackScreenProps<HomeStackParamList, 'ListingDetail'>,
+  BottomTabScreenProps<MainTabParamList>
+>;
 
 export default function ListingDetailScreen({ route, navigation }: Props) {
   const { listingId } = route.params;
@@ -54,6 +60,7 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
   const { data: listing, isLoading, error: queryError, refetch, isRefetching } = useQuery({
     queryKey: ['listing', listingId],
     queryFn: async () => {
+      console.log('[ListingDetail] Fetching listing data...');
       // Simplified query - only join tables that exist
       const { data, error } = await supabase
         .from('listings')
@@ -64,6 +71,8 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
         `)
         .eq('id', listingId)
         .single();
+
+      console.log('[ListingDetail] Fetched listing, current_price:', data?.current_price);
 
       if (error) {
         throw error;
@@ -80,22 +89,103 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
 
         (data as ListingWithDetails).is_watched = !!watchData;
 
-        // Get user's current bid if any
+        // Get user's current bid if any (highest amount by this user)
         const { data: bidData } = await supabase
           .from('bids')
           .select('*')
           .eq('listing_id', listingId)
           .eq('bidder_id', user.id)
-          .order('created_at', { ascending: false })
+          .order('amount', { ascending: false })
           .limit(1)
           .single();
 
         (data as ListingWithDetails).my_bid = bidData || null;
+
+        // Get the actual winning bid to determine true winning status
+        // Use the highest bid amount as the source of truth (most reliable)
+        // Even if multiple bids have status='winning', the one with highest amount is the true winner
+        const { data: highestBid } = await supabase
+          .from('bids')
+          .select('bidder_id, amount, status')
+          .eq('listing_id', listingId)
+          .order('amount', { ascending: false })
+          .limit(1)
+          .single();
+
+        // Determine if user is actually winning based on highest bid amount
+        if (bidData && (data as ListingWithDetails).my_bid) {
+          const isActuallyWinning = highestBid?.bidder_id === user.id;
+          (data as ListingWithDetails).my_bid!.status = isActuallyWinning ? 'winning' : 'outbid';
+          console.log('[ListingDetail] Bid status check:', {
+            myBidAmount: bidData.amount,
+            highestBidAmount: highestBid?.amount,
+            highestBidderId: highestBid?.bidder_id,
+            myId: user.id,
+            isWinning: isActuallyWinning
+          });
+        }
       }
 
       return data as ListingWithDetails;
     },
+    // Always refetch when screen is focused to ensure fresh data
+    refetchOnMount: 'always',
   });
+
+  // Refetch when screen comes back into focus (e.g., returning from PlaceBidScreen)
+  useFocusEffect(
+    useCallback(() => {
+      console.log('[ListingDetail] Screen focused, refetching...');
+      refetch();
+    }, [refetch])
+  );
+
+  // Real-time subscription for listing and bid updates
+  useEffect(() => {
+    if (!listingId) return;
+
+    console.log('[Realtime] Setting up subscriptions for listing:', listingId);
+
+    // Use a single channel for all subscriptions on this listing
+    const channelName = `listing-updates-${listingId}`;
+    const channel = supabase.channel(channelName);
+
+    channel
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'listings',
+          filter: `id=eq.${listingId}`,
+        },
+        (payload) => {
+          console.log('[Realtime] Listing changed:', payload);
+          queryClient.invalidateQueries({ queryKey: ['listing', listingId] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'bids',
+          filter: `listing_id=eq.${listingId}`,
+        },
+        (payload) => {
+          console.log('[Realtime] Bid changed:', payload);
+          queryClient.invalidateQueries({ queryKey: ['listing', listingId] });
+        }
+      )
+      .subscribe((status, err) => {
+        console.log('[Realtime] Subscription status:', status, err ? err.message : '');
+      });
+
+    return () => {
+      console.log('[Realtime] Removing channel:', channelName);
+      supabase.removeChannel(channel);
+    };
+  }, [listingId]); // Remove queryClient from deps - it's stable
 
   // Toggle watchlist mutation
   const watchlistMutation = useMutation({
@@ -171,10 +261,10 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
     if (!listing) return;
     mediumTap();
     // Navigate to edit listing screen where seller can update dates and relist
-    navigation.navigate('ProfileTab' as never, {
+    navigation.navigate('ProfileTab', {
       screen: 'EditListing',
       params: { listingId },
-    } as never);
+    });
   };
 
   const handleContactSeller = async () => {
@@ -203,10 +293,10 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
 
       if (existingConv) {
         // Navigate to existing conversation
-        navigation.navigate('MessagesTab' as never, {
+        navigation.navigate('MessagesTab', {
           screen: 'Conversation',
           params: { conversationId: existingConv.id },
-        } as never);
+        });
         return;
       }
 
@@ -225,10 +315,10 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
       if (error) throw error;
 
       // Navigate to new conversation
-      navigation.navigate('MessagesTab' as never, {
+      navigation.navigate('MessagesTab', {
         screen: 'Conversation',
         params: { conversationId: newConv.id },
-      } as never);
+      });
     } catch {
       Alert.alert('Error', 'Failed to start conversation. Please try again.');
     }
@@ -288,9 +378,9 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
   // Seller can relist if auction ended but didn't sell
   const canRelist = isOwner && hasEnded && !isSold;
 
-  const currentPrice = isAuction ? (listing.current_bid || listing.starting_price) : listing.fixed_price;
-  const hasReserve = listing.reserve_price && (!listing.current_bid || listing.current_bid < listing.reserve_price);
-  const reserveMet = listing.reserve_price && listing.current_bid && listing.current_bid >= listing.reserve_price;
+  const currentPrice = isAuction ? (listing.current_price || listing.starting_price) : listing.fixed_price;
+  const hasReserve = listing.reserve_price && (!listing.current_price || listing.current_price < listing.reserve_price);
+  const reserveMet = listing.reserve_price && listing.current_price && listing.current_price >= listing.reserve_price;
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
@@ -415,7 +505,7 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
             <View style={styles.priceRow}>
               <View>
                 <Text style={[styles.priceLabel, { color: themeColors.textMuted }]}>
-                  {isAuction ? (listing.current_bid ? 'Current Bid' : 'Starting Price') : 'Price'}
+                  {isAuction ? (listing.current_price ? 'Current Bid' : 'Starting Price') : 'Price'}
                 </Text>
                 <Text style={[styles.price, { color: themeColors.textPrimary }]}>
                   {currentPrice ? formatCurrency(currentPrice) : 'No bids yet'}
@@ -478,15 +568,23 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
                   size={16}
                   color={listing.my_bid.status === 'winning' ? themeColors.success : themeColors.error}
                 />
-                <Text style={[
-                  styles.yourBidText,
-                  { color: listing.my_bid.status === 'winning' ? themeColors.success : themeColors.error }
-                ]}>
-                  {listing.my_bid.status === 'winning'
-                    ? `You're winning at ${formatCurrency(listing.my_bid.amount)}`
-                    : `You've been outbid (your bid: ${formatCurrency(listing.my_bid.amount)})`
-                  }
-                </Text>
+                <View style={styles.yourBidTextContainer}>
+                  <Text style={[
+                    styles.yourBidText,
+                    { color: listing.my_bid.status === 'winning' ? themeColors.success : themeColors.error }
+                  ]}>
+                    {listing.my_bid.status === 'winning'
+                      ? `You're winning at ${formatCurrency(listing.my_bid.amount)}`
+                      : `You've been outbid (your bid: ${formatCurrency(listing.my_bid.amount)})`
+                    }
+                  </Text>
+                  {/* Only show max bid if reserve is met */}
+                  {reserveMet && listing.my_bid.max_bid && listing.my_bid.max_bid > listing.my_bid.amount && (
+                    <Text style={[styles.yourMaxBidText, { color: themeColors.textSecondary }]}>
+                      Your max bid: {formatCurrency(listing.my_bid.max_bid)}
+                    </Text>
+                  )}
+                </View>
               </View>
             )}
           </View>
@@ -504,13 +602,7 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
                 style={[styles.sellerCard, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}
                 onPress={() => navigation.navigate('SellerProfile', { sellerId: listing.seller!.id })}
               >
-                <View style={[styles.sellerAvatar, { backgroundColor: themeColors.sand }]}>
-                  {listing.seller.avatar_url ? (
-                    <Image source={{ uri: listing.seller.avatar_url }} style={styles.avatarImage} />
-                  ) : (
-                    <Feather name="user" size={24} color={themeColors.textMuted} />
-                  )}
-                </View>
+                <Avatar url={listing.seller.avatar_url} size="md" />
                 <View style={styles.sellerInfo}>
                   <Text style={[styles.sellerName, { color: themeColors.textPrimary }]}>
                     {listing.seller.company_name || listing.seller.full_name || 'Seller'}
@@ -1045,9 +1137,17 @@ const styles = StyleSheet.create({
   outbidBid: {
     backgroundColor: colors.errorLight,
   },
+  yourBidTextContainer: {
+    flex: 1,
+    marginLeft: spacing.xs,
+  },
   yourBidText: {
     fontSize: fontSize.sm,
     fontWeight: fontWeight.medium,
+  },
+  yourMaxBidText: {
+    fontSize: fontSize.xs,
+    marginTop: 2,
   },
   premiumNotice: {
     flexDirection: 'row',
@@ -1071,6 +1171,7 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     backgroundColor: colors.white,
     borderRadius: borderRadius.xl,
+    gap: spacing.md,
     ...shadows.sm,
   },
   contactSellerButton: {

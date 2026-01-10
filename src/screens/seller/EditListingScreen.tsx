@@ -249,6 +249,9 @@ export default function EditListingScreen({ route, navigation }: Props) {
         accept_offers: listing.accept_offers,
         auto_accept_price: listing.auto_accept_price?.toString() || '',
         auto_decline_price: listing.auto_decline_price?.toString() || '',
+        auction_duration_days: '7',
+        schedule_start: 'now',
+        scheduled_start_days: '1',
         make: listing.make || '',
         model: listing.model || '',
         year: listing.year?.toString() || '',
@@ -382,7 +385,7 @@ export default function EditListingScreen({ route, navigation }: Props) {
 
   const handleAddImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsMultipleSelection: true,
       quality: 0.8,
     });

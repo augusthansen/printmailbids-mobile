@@ -12,10 +12,14 @@ import {
   TextInput,
   Modal,
   Platform,
+  Keyboard,
+  TouchableWithoutFeedback,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import Avatar from '../../components/Avatar';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -73,39 +77,22 @@ export default function InvoiceDetailScreen() {
 
   const [showDeliveryModal, setShowDeliveryModal] = useState(false);
   const [showShippingModal, setShowShippingModal] = useState(false);
-  const [showUploadBolModal, setShowUploadBolModal] = useState(false);
   const [deliveryCondition, setDeliveryCondition] = useState<DeliveryCondition>('good');
   const [deliveryNotes, setDeliveryNotes] = useState('');
   const [bolImage, setBolImage] = useState<string | null>(null);
   const [damagePhotos, setDamagePhotos] = useState<string[]>([]);
-  const [shippingPhotos, setShippingPhotos] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
 
   // Shipping details state (seller)
   const [shippingCarrier, setShippingCarrier] = useState('Freight');
   const [trackingNumber, setTrackingNumber] = useState('');
 
-  // Freight shipping details state (seller - enhanced)
+  // Freight shipping details state (seller - simplified for mobile)
   const [freightCarrier, setFreightCarrier] = useState('');
   const [freightProNumber, setFreightProNumber] = useState('');
   const [freightBolNumber, setFreightBolNumber] = useState('');
-  const [freightClass, setFreightClass] = useState('');
-  const [freightWeightLbs, setFreightWeightLbs] = useState('');
-  const [freightPickupDate, setFreightPickupDate] = useState('');
   const [freightEstimatedDelivery, setFreightEstimatedDelivery] = useState('');
   const [freightSpecialInstructions, setFreightSpecialInstructions] = useState('');
-
-  // Pickup contact state
-  const [pickupContactName, setPickupContactName] = useState('');
-  const [pickupContactCompany, setPickupContactCompany] = useState('');
-  const [pickupContactPhone, setPickupContactPhone] = useState('');
-  const [pickupContactEmail, setPickupContactEmail] = useState('');
-
-  // Delivery contact state
-  const [deliveryContactName, setDeliveryContactName] = useState('');
-  const [deliveryContactCompany, setDeliveryContactCompany] = useState('');
-  const [deliveryContactPhone, setDeliveryContactPhone] = useState('');
-  const [deliveryContactEmail, setDeliveryContactEmail] = useState('');
 
   const { data: invoice, isLoading, refetch } = useQuery<InvoiceWithDetails>({
     queryKey: ['invoice', invoiceId],
@@ -133,28 +120,79 @@ export default function InvoiceDetailScreen() {
   // Upload image to Supabase Storage
   const uploadImage = async (uri: string, path: string): Promise<string | null> => {
     try {
+      const fileExt = uri.split('.').pop()?.toLowerCase() || 'jpg';
+      const fileName = `${path}/${Date.now()}.${fileExt}`;
+      // Use correct MIME types (image/jpeg not image/jpg)
+      const getMimeType = (ext: string) => {
+        switch (ext) {
+          case 'jpg':
+          case 'jpeg':
+            return 'image/jpeg';
+          case 'png':
+            return 'image/png';
+          case 'gif':
+            return 'image/gif';
+          case 'heic':
+            return 'image/heic';
+          case 'webp':
+            return 'image/webp';
+          case 'pdf':
+            return 'application/pdf';
+          default:
+            return 'image/jpeg';
+        }
+      };
+      const contentType = getMimeType(fileExt);
+
+      // Fetch the file and convert to base64 for React Native
       const response = await fetch(uri);
       const blob = await response.blob();
 
-      const fileExt = uri.split('.').pop()?.toLowerCase() || 'jpg';
-      const fileName = `${path}/${Date.now()}.${fileExt}`;
+      // Convert blob to base64
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (typeof reader.result === 'string') {
+            // Remove the data URL prefix (e.g., "data:image/jpeg;base64,")
+            const base64Data = reader.result.split(',')[1];
+            resolve(base64Data);
+          } else {
+            reject(new Error('Failed to read file'));
+          }
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+
+      // Decode base64 to Uint8Array for upload
+      const binaryString = atob(base64);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+
+      console.log(`Uploading file: ${fileName}, size: ${bytes.length} bytes`);
 
       const { data, error } = await supabase.storage
         .from('delivery-documents')
-        .upload(fileName, blob, {
-          contentType: `image/${fileExt}`,
+        .upload(fileName, bytes, {
+          contentType,
           upsert: false,
         });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Storage upload error:', error.message);
+        throw error;
+      }
 
       const { data: urlData } = supabase.storage
         .from('delivery-documents')
         .getPublicUrl(data.path);
 
+      console.log('Upload successful, URL:', urlData.publicUrl);
       return urlData.publicUrl;
-    } catch (error) {
-      console.error('Error uploading image:', error);
+    } catch (error: any) {
+      console.error('Error uploading image:', error?.message || error);
       return null;
     }
   };
@@ -166,18 +204,28 @@ export default function InvoiceDetailScreen() {
       bolImageUrl: string | null;
       damagePhotoUrls: string[];
     }) => {
-      const { error } = await supabase
+      const now = new Date().toISOString();
+
+      const updateData = {
+        fulfillment_status: 'completed' as const,
+        delivered_at: now,
+        delivery_confirmed_at: now,
+        delivery_confirmed_by: user?.id,
+        delivery_condition: params.condition,
+        delivery_notes: params.notes,
+        delivery_bol_url: params.bolImageUrl,
+        delivery_damage_photos: params.damagePhotoUrls.length > 0 ? params.damagePhotoUrls : null,
+      };
+
+      console.log('Updating invoice with:', JSON.stringify(updateData, null, 2));
+
+      const { data, error } = await supabase
         .from('invoices')
-        .update({
-          fulfillment_status: 'completed',
-          delivery_confirmed_at: new Date().toISOString(),
-          delivery_confirmed_by: user?.id,
-          delivery_condition: params.condition,
-          delivery_notes: params.notes,
-          delivery_bol_url: params.bolImageUrl,
-          delivery_damage_photos: params.damagePhotoUrls.length > 0 ? params.damagePhotoUrls : null,
-        })
-        .eq('id', invoiceId);
+        .update(updateData)
+        .eq('id', invoiceId)
+        .select();
+
+      console.log('Update result - data:', data, 'error:', error);
 
       if (error) throw error;
 
@@ -240,56 +288,6 @@ export default function InvoiceDetailScreen() {
     },
   });
 
-  // Mutation for uploading BOL and shipping photos before delivery confirmation
-  const uploadBolAndPhotosMutation = useMutation({
-    mutationFn: async (params: { bolUrl: string | null; shippingPhotoUrls: string[] }) => {
-      const updateData: Record<string, unknown> = {};
-
-      if (params.bolUrl) {
-        updateData.delivery_bol_url = params.bolUrl;
-      }
-
-      // Note: shipping_photos field would need to be added to database if not present
-      // For now, we store them along with the BOL
-
-      if (Object.keys(updateData).length === 0 && params.shippingPhotoUrls.length === 0) {
-        throw new Error('No files to upload');
-      }
-
-      const { error } = await supabase
-        .from('invoices')
-        .update(updateData)
-        .eq('id', invoiceId);
-
-      if (error) throw error;
-
-      // Notify seller that buyer uploaded documents
-      await supabase.from('notifications').insert({
-        user_id: invoice?.seller_id,
-        type: 'payment_confirmed',
-        title: 'Documents Uploaded',
-        body: `Buyer has uploaded ${params.bolUrl ? 'a signed BOL' : ''}${params.bolUrl && params.shippingPhotoUrls.length > 0 ? ' and ' : ''}${params.shippingPhotoUrls.length > 0 ? `${params.shippingPhotoUrls.length} shipping photo(s)` : ''} for "${invoice?.listing?.title}".`,
-        invoice_id: invoiceId,
-        listing_id: invoice?.listing_id,
-      });
-    },
-    onSuccess: () => {
-      successFeedback();
-      setShowUploadBolModal(false);
-      setBolImage(null);
-      setShippingPhotos([]);
-      setIsUploading(false);
-      queryClient.invalidateQueries({ queryKey: ['invoice', invoiceId] });
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
-      Alert.alert('Success', 'Documents uploaded successfully!');
-    },
-    onError: () => {
-      errorFeedback();
-      setIsUploading(false);
-      Alert.alert('Error', 'Failed to upload documents. Please try again.');
-    },
-  });
-
   // Mutation for seller to confirm wire payment received
   const confirmWireMutation = useMutation({
     mutationFn: async (referenceNumber?: string) => {
@@ -327,29 +325,12 @@ export default function InvoiceDetailScreen() {
       status: FulfillmentStatus;
       trackingNumber?: string;
       shippingCarrier?: string;
-      // Freight details
+      // Freight details (simplified)
       freightCarrier?: string;
       freightProNumber?: string;
       freightBolNumber?: string;
-      freightClass?: string;
-      freightWeightLbs?: number;
-      freightPickupDate?: string;
       freightEstimatedDelivery?: string;
       freightSpecialInstructions?: string;
-      // Pickup contact
-      pickupContact?: {
-        name?: string;
-        company?: string;
-        phone?: string;
-        email?: string;
-      };
-      // Delivery contact
-      deliveryContact?: {
-        name?: string;
-        company?: string;
-        phone?: string;
-        email?: string;
-      };
     }) => {
       const updateData: Record<string, unknown> = {
         fulfillment_status: params.status,
@@ -378,28 +359,11 @@ export default function InvoiceDetailScreen() {
         if (params.freightBolNumber) {
           updateData.freight_bol_number = params.freightBolNumber;
         }
-        if (params.freightClass) {
-          updateData.freight_class = params.freightClass;
-        }
-        if (params.freightWeightLbs) {
-          updateData.freight_weight_lbs = params.freightWeightLbs;
-        }
-        if (params.freightPickupDate) {
-          updateData.freight_pickup_date = params.freightPickupDate;
-        }
         if (params.freightEstimatedDelivery) {
           updateData.freight_estimated_delivery = params.freightEstimatedDelivery;
         }
         if (params.freightSpecialInstructions) {
           updateData.freight_special_instructions = params.freightSpecialInstructions;
-        }
-        // Pickup contact (stored as JSON)
-        if (params.pickupContact && Object.values(params.pickupContact).some(v => v)) {
-          updateData.freight_pickup_contact = params.pickupContact;
-        }
-        // Delivery contact (stored as JSON)
-        if (params.deliveryContact && Object.values(params.deliveryContact).some(v => v)) {
-          updateData.freight_delivery_contact = params.deliveryContact;
         }
       }
 
@@ -416,21 +380,23 @@ export default function InvoiceDetailScreen() {
       if (error) throw error;
 
       // Send notification to buyer
-      const notificationTitle = {
+      const notificationTitleMap: Record<string, string> = {
         'packaging': 'Order Being Prepared',
         'ready_for_pickup': 'Order Ready for Pickup',
         'shipped': 'Order Shipped!',
         'delivered': 'Order Delivered',
-      }[params.status] || 'Order Status Updated';
+      };
+      const notificationTitle = notificationTitleMap[params.status] || 'Order Status Updated';
 
-      const notificationBody = {
+      const notificationBodyMap: Record<string, string> = {
         'packaging': `Your order for "${invoice?.listing?.title}" is being prepared for shipment.`,
         'ready_for_pickup': `Your order for "${invoice?.listing?.title}" is ready for pickup/shipping.`,
         'shipped': params.trackingNumber
           ? `Your order for "${invoice?.listing?.title}" has shipped! Tracking: ${params.trackingNumber}`
           : `Your order for "${invoice?.listing?.title}" has shipped!`,
         'delivered': `Your order for "${invoice?.listing?.title}" has been delivered. Please confirm receipt.`,
-      }[params.status] || `Order status updated to ${params.status}`;
+      };
+      const notificationBody = notificationBodyMap[params.status] || `Order status updated to ${params.status}`;
 
       await supabase.from('notifications').insert({
         user_id: invoice?.buyer_id,
@@ -444,31 +410,22 @@ export default function InvoiceDetailScreen() {
     onSuccess: () => {
       successFeedback();
       setShowShippingModal(false);
+      // Reset shipping form fields
       setShippingCarrier('');
       setTrackingNumber('');
       setFreightCarrier('');
       setFreightProNumber('');
       setFreightBolNumber('');
-      setFreightClass('');
-      setFreightWeightLbs('');
-      setFreightPickupDate('');
       setFreightEstimatedDelivery('');
       setFreightSpecialInstructions('');
-      setPickupContactName('');
-      setPickupContactCompany('');
-      setPickupContactPhone('');
-      setPickupContactEmail('');
-      setDeliveryContactName('');
-      setDeliveryContactCompany('');
-      setDeliveryContactPhone('');
-      setDeliveryContactEmail('');
       queryClient.invalidateQueries({ queryKey: ['invoice', invoiceId] });
       queryClient.invalidateQueries({ queryKey: ['myInvoices'] });
       queryClient.invalidateQueries({ queryKey: ['mySales'] });
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
     },
-    onError: () => {
+    onError: (error) => {
       errorFeedback();
+      console.error('Failed to update fulfillment:', error);
       Alert.alert('Error', 'Failed to update order status. Please try again.');
     },
   });
@@ -526,7 +483,7 @@ export default function InvoiceDetailScreen() {
               'Enter the wire transfer reference number (optional)',
               [
                 { text: 'Skip', onPress: () => confirmWireMutation.mutate(undefined) },
-                { text: 'Confirm', onPress: (ref) => confirmWireMutation.mutate(ref) },
+                { text: 'Confirm', onPress: (ref: string | undefined) => confirmWireMutation.mutate(ref) },
               ],
               'plain-text'
             );
@@ -587,122 +544,13 @@ export default function InvoiceDetailScreen() {
 
     updateFulfillmentMutation.mutate({
       status: 'shipped',
-      // Freight-specific fields
+      // Freight-specific fields (simplified - buyer typically arranges shipping details)
       freightCarrier: freightCarrier.trim(),
       freightProNumber: freightProNumber.trim() || undefined,
       freightBolNumber: freightBolNumber.trim() || undefined,
-      freightClass: freightClass || undefined,
-      freightWeightLbs: freightWeightLbs ? parseInt(freightWeightLbs, 10) : undefined,
-      freightPickupDate: freightPickupDate || undefined,
       freightEstimatedDelivery: freightEstimatedDelivery || undefined,
       freightSpecialInstructions: freightSpecialInstructions.trim() || undefined,
-      // Pickup contact
-      pickupContact: (pickupContactName || pickupContactCompany || pickupContactPhone || pickupContactEmail) ? {
-        name: pickupContactName.trim() || undefined,
-        company: pickupContactCompany.trim() || undefined,
-        phone: pickupContactPhone.trim() || undefined,
-        email: pickupContactEmail.trim() || undefined,
-      } : undefined,
-      // Delivery contact
-      deliveryContact: (deliveryContactName || deliveryContactCompany || deliveryContactPhone || deliveryContactEmail) ? {
-        name: deliveryContactName.trim() || undefined,
-        company: deliveryContactCompany.trim() || undefined,
-        phone: deliveryContactPhone.trim() || undefined,
-        email: deliveryContactEmail.trim() || undefined,
-      } : undefined,
     });
-  };
-
-  // Handler for buyer to open pre-delivery BOL/photos upload modal
-  const handleOpenUploadBolModal = () => {
-    lightTap();
-    setShowUploadBolModal(true);
-  };
-
-  // Handler for buyer to submit pre-delivery BOL and shipping photos
-  const handleSubmitUploadBol = async () => {
-    lightTap();
-
-    if (!bolImage && shippingPhotos.length === 0) {
-      Alert.alert('No Files', 'Please select a BOL or shipping photos to upload.');
-      return;
-    }
-
-    setIsUploading(true);
-
-    try {
-      let bolUrl: string | null = null;
-      const uploadedShippingPhotoUrls: string[] = [];
-
-      // Upload BOL if selected
-      if (bolImage) {
-        bolUrl = await uploadImage(bolImage, `${invoiceId}/bol`);
-      }
-
-      // Upload shipping photos
-      for (const photo of shippingPhotos) {
-        const url = await uploadImage(photo, `${invoiceId}/shipping`);
-        if (url) {
-          uploadedShippingPhotoUrls.push(url);
-        }
-      }
-
-      uploadBolAndPhotosMutation.mutate({
-        bolUrl,
-        shippingPhotoUrls: uploadedShippingPhotoUrls,
-      });
-    } catch (error) {
-      setIsUploading(false);
-      Alert.alert('Error', 'Failed to upload files. Please try again.');
-    }
-  };
-
-  // Handler for adding shipping photos
-  const pickShippingPhoto = async () => {
-    lightTap();
-
-    if (shippingPhotos.length >= 5) {
-      Alert.alert('Limit Reached', 'You can upload a maximum of 5 shipping photos.');
-      return;
-    }
-
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission Required', 'Please allow access to your photo library to upload photos.');
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsMultipleSelection: true,
-      selectionLimit: 5 - shippingPhotos.length,
-      quality: 0.8,
-    });
-
-    if (!result.canceled && result.assets.length > 0) {
-      const newPhotos = result.assets.map(asset => asset.uri);
-      setShippingPhotos(prev => [...prev, ...newPhotos].slice(0, 5));
-    }
-  };
-
-  const removeShippingPhoto = (index: number) => {
-    lightTap();
-    setShippingPhotos(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const handleMarkDelivered = () => {
-    lightTap();
-    Alert.alert(
-      'Mark as Delivered',
-      'Confirm that this order has been delivered to the buyer? The buyer will be prompted to confirm receipt.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Confirm Delivered',
-          onPress: () => updateFulfillmentMutation.mutate({ status: 'delivered' }),
-        },
-      ]
-    );
   };
 
   const pickBolImage = async () => {
@@ -715,7 +563,7 @@ export default function InvoiceDetailScreen() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: false,
       quality: 0.8,
     });
@@ -760,7 +608,7 @@ export default function InvoiceDetailScreen() {
     lightTap();
 
     if (damagePhotos.length >= 5) {
-      Alert.alert('Limit Reached', 'You can upload a maximum of 5 damage photos.');
+      Alert.alert('Limit Reached', 'You can upload a maximum of 5 photos.');
       return;
     }
 
@@ -770,14 +618,17 @@ export default function InvoiceDetailScreen() {
       return;
     }
 
+    const remainingSlots = 5 - damagePhotos.length;
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: false,
+      mediaTypes: ['images'],
+      allowsMultipleSelection: true,
+      selectionLimit: remainingSlots,
       quality: 0.8,
     });
 
-    if (!result.canceled && result.assets[0]) {
-      setDamagePhotos(prev => [...prev, result.assets[0].uri]);
+    if (!result.canceled && result.assets.length > 0) {
+      const newPhotos = result.assets.map(asset => asset.uri);
+      setDamagePhotos(prev => [...prev, ...newPhotos].slice(0, 5));
     }
   };
 
@@ -785,7 +636,7 @@ export default function InvoiceDetailScreen() {
     lightTap();
 
     if (damagePhotos.length >= 5) {
-      Alert.alert('Limit Reached', 'You can upload a maximum of 5 damage photos.');
+      Alert.alert('Limit Reached', 'You can upload a maximum of 5 photos.');
       return;
     }
 
@@ -807,8 +658,8 @@ export default function InvoiceDetailScreen() {
 
   const showDamagePhotoOptions = () => {
     Alert.alert(
-      'Add Damage Photo',
-      'Document any damage to the shipment',
+      'Add Photos',
+      'Document the delivery',
       [
         { text: 'Take Photo', onPress: takeDamagePhoto },
         { text: 'Choose from Library', onPress: pickDamagePhoto },
@@ -849,7 +700,7 @@ export default function InvoiceDetailScreen() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: false,
       quality: 0.8,
     });
@@ -913,16 +764,30 @@ export default function InvoiceDetailScreen() {
 
       // Upload BOL image if present
       if (bolImage) {
+        console.log('Uploading BOL image...');
         bolImageUrl = await uploadImage(bolImage, `bol/${invoiceId}`);
-      }
-
-      // Upload damage photos if present
-      for (const photoUri of damagePhotos) {
-        const url = await uploadImage(photoUri, `damage/${invoiceId}`);
-        if (url) {
-          damagePhotoUrls.push(url);
+        console.log('BOL upload result:', bolImageUrl);
+        if (!bolImageUrl) {
+          Alert.alert('Warning', 'Failed to upload BOL image. Continuing without it.');
         }
       }
+
+      // Upload delivery/damage photos if present
+      if (damagePhotos.length > 0) {
+        console.log(`Uploading ${damagePhotos.length} photos...`);
+        for (const photoUri of damagePhotos) {
+          const url = await uploadImage(photoUri, `delivery/${invoiceId}`);
+          console.log('Photo upload result:', url);
+          if (url) {
+            damagePhotoUrls.push(url);
+          }
+        }
+        if (damagePhotoUrls.length < damagePhotos.length) {
+          Alert.alert('Warning', `Only ${damagePhotoUrls.length} of ${damagePhotos.length} photos uploaded successfully.`);
+        }
+      }
+
+      console.log('Submitting confirmation with:', { bolImageUrl, damagePhotoUrls });
 
       // Submit the confirmation
       confirmDeliveryMutation.mutate({
@@ -932,9 +797,9 @@ export default function InvoiceDetailScreen() {
         damagePhotoUrls,
       });
     } catch (error) {
+      console.error('Delivery confirmation error:', error);
       errorFeedback();
       Alert.alert('Error', 'Failed to upload images. Please try again.');
-    } finally {
       setIsUploading(false);
     }
   };
@@ -1145,6 +1010,7 @@ export default function InvoiceDetailScreen() {
   }
 
   const currentStep = getPipelineStep(invoice.fulfillment_status);
+  console.log('Pipeline debug:', { fulfillment_status: invoice.fulfillment_status, currentStep });
   const primaryImage = invoice.listing?.images?.find(img => img.is_primary) || invoice.listing?.images?.[0];
   const isPaymentPending = invoice.status === 'pending';
   const isAwaitingWire = invoice.status === 'awaiting_wire';
@@ -1153,16 +1019,15 @@ export default function InvoiceDetailScreen() {
   const canConfirmDelivery = isBuyer && isDelivered && !invoice.delivery_confirmed_at;
   const canConfirmWire = isSeller && isAwaitingWire;
 
-  // Seller fulfillment status progression
+  // Seller fulfillment status progression (seller's last action is marking as shipped)
   const canMarkPackaging = isSeller && isPaid && invoice.fulfillment_status === 'paid';
   const canMarkReady = isSeller && isPaid && invoice.fulfillment_status === 'packaging';
   const canMarkShipped = isSeller && isPaid && invoice.fulfillment_status === 'ready_for_pickup';
-  const canMarkDelivered = isSeller && isPaid && invoice.fulfillment_status === 'shipped';
-  const hasSellerAction = canMarkPackaging || canMarkReady || canMarkShipped || canMarkDelivered;
+  const hasSellerAction = canMarkPackaging || canMarkReady || canMarkShipped;
 
-  // Buyer can upload BOL/photos when order is shipped but not yet confirmed delivered
+  // Buyer marks as delivered when they receive the item, then confirms condition
   const isShipped = invoice.fulfillment_status === 'shipped';
-  const canUploadBol = isBuyer && isShipped && !invoice.delivery_confirmed_at;
+  const canBuyerMarkDelivered = isBuyer && isShipped && !invoice.delivery_confirmed_at;
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
@@ -1218,6 +1083,10 @@ export default function InvoiceDetailScreen() {
                 const isCurrent = index === currentStep;
                 const isLast = index === PIPELINE_STEPS.length - 1;
 
+                // Use amber/gold color for the final "Completed" step to stand out
+                const isCompletedStep = step.key === 'completed' && isCompleted;
+                const iconColor = isCompletedStep ? '#f59e0b' : (isCompleted ? colors.white : colors.textLight);
+
                 return (
                   <View key={step.key} style={styles.timelineItem}>
                     <View style={styles.timelineLeft}>
@@ -1229,7 +1098,7 @@ export default function InvoiceDetailScreen() {
                         <Feather
                           name={step.icon}
                           size={16}
-                          color={isCompleted ? colors.white : colors.textLight}
+                          color={iconColor}
                         />
                       </View>
                       {!isLast && (
@@ -1385,13 +1254,17 @@ export default function InvoiceDetailScreen() {
                   <View style={[styles.documentSection, { borderTopColor: themeColors.border }]}>
                     <Text style={[styles.documentLabel, { color: themeColors.textSecondary }]}>Signed Bill of Lading</Text>
                     <TouchableOpacity
-                      style={styles.documentPreview}
-                      onPress={() => Linking.openURL(invoice.delivery_bol_url!)}
+                      style={[styles.documentPreview, { backgroundColor: themeColors.sand }]}
+                      onPress={() => {
+                        console.log('Opening BOL URL:', invoice.delivery_bol_url);
+                        Linking.openURL(invoice.delivery_bol_url!);
+                      }}
                     >
                       <Image
-                        source={invoice.delivery_bol_url}
+                        source={{ uri: invoice.delivery_bol_url }}
                         style={styles.documentImage}
                         contentFit="cover"
+                        onError={(e) => console.log('BOL Image error:', e)}
                       />
                       <View style={styles.documentOverlay}>
                         <Feather name="external-link" size={20} color={colors.white} />
@@ -1440,10 +1313,12 @@ export default function InvoiceDetailScreen() {
                   </TouchableOpacity>
                 )}
 
-                {/* Damage Photos */}
+                {/* Delivery Photos */}
                 {invoice.delivery_damage_photos && invoice.delivery_damage_photos.length > 0 && (
                   <View style={[styles.documentSection, { borderTopColor: themeColors.border }]}>
-                    <Text style={[styles.documentLabel, { color: themeColors.textSecondary }]}>Damage Documentation</Text>
+                    <Text style={[styles.documentLabel, { color: themeColors.textSecondary }]}>
+                      {invoice.delivery_condition === 'good' ? 'Delivery Photos' : 'Damage Documentation'}
+                    </Text>
                     <ScrollView
                       horizontal
                       showsHorizontalScrollIndicator={false}
@@ -1452,13 +1327,17 @@ export default function InvoiceDetailScreen() {
                       {invoice.delivery_damage_photos.map((photoUrl, index) => (
                         <TouchableOpacity
                           key={index}
-                          style={styles.damagePhotoPreview}
-                          onPress={() => Linking.openURL(photoUrl)}
+                          style={[styles.damagePhotoPreview, { backgroundColor: themeColors.sand }]}
+                          onPress={() => {
+                            console.log('Opening photo URL:', photoUrl);
+                            Linking.openURL(photoUrl);
+                          }}
                         >
                           <Image
-                            source={photoUrl}
+                            source={{ uri: photoUrl }}
                             style={styles.damagePhotoImage}
                             contentFit="cover"
+                            onError={(e) => console.log('Photo error:', e)}
                           />
                         </TouchableOpacity>
                       ))}
@@ -1498,13 +1377,7 @@ export default function InvoiceDetailScreen() {
           <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Seller</Text>
           <View style={[styles.card, { backgroundColor: themeColors.surface }]}>
             <View style={styles.sellerRow}>
-              {invoice.seller?.avatar_url ? (
-                <Image source={{ uri: invoice.seller.avatar_url }} style={styles.sellerAvatar} contentFit="cover" />
-              ) : (
-                <View style={styles.sellerAvatarPlaceholder}>
-                  <Feather name="user" size={20} color={themeColors.textMuted} />
-                </View>
-              )}
+              <Avatar url={invoice.seller?.avatar_url} size="md" />
               <View style={styles.sellerInfo}>
                 <Text style={[styles.sellerName, { color: themeColors.textPrimary }]}>{invoice.seller?.company_name || invoice.seller?.full_name}</Text>
                 {invoice.seller?.is_verified && (
@@ -1641,7 +1514,7 @@ export default function InvoiceDetailScreen() {
       </ScrollView>
 
       {/* Action Footer */}
-      {(isPaymentPending || canConfirmDelivery || canConfirmWire || isAwaitingWire || hasSellerAction || canUploadBol) && (
+      {(isPaymentPending || canConfirmDelivery || canBuyerMarkDelivered || canConfirmWire || isAwaitingWire || hasSellerAction) && (
         <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md, backgroundColor: themeColors.surface, borderTopColor: themeColors.border }]}>
           {isPaymentPending && isBuyer && (
             <TouchableOpacity style={styles.payButton} onPress={handlePayNow}>
@@ -1672,17 +1545,6 @@ export default function InvoiceDetailScreen() {
                 Awaiting wire transfer confirmation from seller
               </Text>
             </View>
-          )}
-
-          {/* Buyer Upload BOL/Photos Action - show when shipped but not yet delivered */}
-          {canUploadBol && (
-            <TouchableOpacity
-              style={[styles.sellerActionButton, { backgroundColor: themeColors.accent }]}
-              onPress={handleOpenUploadBolModal}
-            >
-              <Feather name="upload" size={20} color={colors.white} />
-              <Text style={styles.sellerActionButtonText}>Upload BOL / Photos</Text>
-            </TouchableOpacity>
           )}
 
           {/* Seller Fulfillment Actions */}
@@ -1734,27 +1596,13 @@ export default function InvoiceDetailScreen() {
               )}
             </TouchableOpacity>
           )}
-          {canMarkDelivered && (
-            <TouchableOpacity
-              style={[styles.sellerActionButton, { backgroundColor: colors.success }]}
-              onPress={handleMarkDelivered}
-              disabled={updateFulfillmentMutation.isPending}
-            >
-              {updateFulfillmentMutation.isPending ? (
-                <ActivityIndicator size="small" color={colors.white} />
-              ) : (
-                <>
-                  <Feather name="home" size={20} color={colors.white} />
-                  <Text style={styles.sellerActionButtonText}>Mark as Delivered</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          )}
-
-          {canConfirmDelivery && (
+          {/* Buyer marks as delivered and confirms condition */}
+          {(canConfirmDelivery || canBuyerMarkDelivered) && (
             <TouchableOpacity style={styles.confirmButton} onPress={handleConfirmDelivery}>
               <Feather name="check-circle" size={20} color={colors.white} />
-              <Text style={styles.confirmButtonText}>Confirm Delivery</Text>
+              <Text style={styles.confirmButtonText}>
+                {canBuyerMarkDelivered ? 'Mark as Delivered' : 'Confirm Delivery'}
+              </Text>
             </TouchableOpacity>
           )}
         </View>
@@ -1765,10 +1613,19 @@ export default function InvoiceDetailScreen() {
         visible={showDeliveryModal}
         animationType="slide"
         transparent
-        onRequestClose={() => setShowDeliveryModal(false)}
+        onRequestClose={() => {
+          Keyboard.dismiss();
+          setShowDeliveryModal(false);
+        }}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { paddingBottom: insets.bottom + spacing.lg, backgroundColor: themeColors.surface }]}>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={styles.modalOverlay}>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              style={styles.keyboardAvoidingView}
+            >
+              <TouchableWithoutFeedback onPress={(e) => e.stopPropagation()}>
+                <View style={[styles.modalContent, { paddingBottom: insets.bottom + spacing.lg, backgroundColor: themeColors.surface }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: themeColors.textPrimary }]}>Confirm Delivery</Text>
               <TouchableOpacity onPress={() => setShowDeliveryModal(false)}>
@@ -1832,13 +1689,16 @@ export default function InvoiceDetailScreen() {
               )}
             </View>
 
-            {/* Damage Photos - Only show if condition is damaged or partial */}
-            {(deliveryCondition === 'damaged' || deliveryCondition === 'partial') && (
-              <View style={styles.uploadSection}>
-                <Text style={[styles.uploadLabel, { color: themeColors.textPrimary }]}>Damage Documentation</Text>
-                <Text style={[styles.uploadDescription, { color: themeColors.textMuted }]}>
-                  Take photos of any damage for dispute resolution (max 5)
-                </Text>
+            {/* Delivery Photos - Always available for proof of delivery or damage documentation */}
+            <View style={styles.uploadSection}>
+              <Text style={[styles.uploadLabel, { color: themeColors.textPrimary }]}>
+                {deliveryCondition === 'good' ? 'Delivery Photos (Optional)' : 'Damage Documentation'}
+              </Text>
+              <Text style={[styles.uploadDescription, { color: themeColors.textMuted }]}>
+                {deliveryCondition === 'good'
+                  ? 'Take photos as proof of delivery (max 5)'
+                  : 'Take photos of any damage for dispute resolution (max 5)'}
+              </Text>
                 <View style={styles.damagePhotosGrid}>
                   {damagePhotos.map((photo, index) => (
                     <View key={index} style={styles.damagePhotoContainer}>
@@ -1856,12 +1716,11 @@ export default function InvoiceDetailScreen() {
                       style={styles.addDamageButton}
                       onPress={showDamagePhotoOptions}
                     >
-                      <Feather name="plus" size={24} color={colors.error} />
+                      <Feather name="plus" size={24} color={deliveryCondition === 'good' ? colors.accent : colors.error} />
                     </TouchableOpacity>
                   )}
                 </View>
-              </View>
-            )}
+            </View>
 
             <Text style={[styles.notesLabel, { color: themeColors.textSecondary }]}>
               {deliveryCondition === 'good' ? 'Additional Notes (Optional)' : 'Describe the Issue (Required)'}
@@ -1906,39 +1765,54 @@ export default function InvoiceDetailScreen() {
                 </>
               )}
             </TouchableOpacity>
+                </View>
+              </TouchableWithoutFeedback>
+            </KeyboardAvoidingView>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
-      {/* Shipping Details Modal */}
+      {/* Shipping Details Modal - Simplified for seller */}
       <Modal
         visible={showShippingModal}
         animationType="slide"
         transparent
-        onRequestClose={() => setShowShippingModal(false)}
+        onRequestClose={() => {
+          Keyboard.dismiss();
+          setShowShippingModal(false);
+        }}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: themeColors.surface, maxHeight: '92%' }]}>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={styles.modalOverlay}>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              style={styles.keyboardAvoidingView}
+            >
+              <TouchableWithoutFeedback onPress={(e) => e.stopPropagation()}>
+                <View style={[styles.modalContent, { backgroundColor: themeColors.surface, paddingBottom: insets.bottom + spacing.lg }]}>
             <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: themeColors.textPrimary }]}>Freight Shipping</Text>
+              <Text style={[styles.modalTitle, { color: themeColors.textPrimary }]}>Shipping Details</Text>
               <TouchableOpacity onPress={() => setShowShippingModal(false)}>
                 <Feather name="x" size={24} color={themeColors.textPrimary} />
               </TouchableOpacity>
             </View>
 
+            <Text style={[styles.modalSubtitle, { color: themeColors.textSecondary, marginBottom: spacing.md }]}>
+              Enter the carrier and tracking info. The buyer will be notified when shipped.
+            </Text>
+
             <ScrollView
-              showsVerticalScrollIndicator={true}
+              showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xl }}
             >
               {/* Freight Carrier (Required) */}
               <View style={styles.shippingInputGroup}>
                 <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>
-                  Freight Carrier <Text style={{ color: themeColors.error }}>*</Text>
+                  Carrier <Text style={{ color: themeColors.error }}>*</Text>
                 </Text>
                 <TextInput
                   style={[styles.shippingInput, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : colors.sand, color: themeColors.textPrimary, borderColor: themeColors.border }]}
-                  placeholder="e.g., XPO, Estes, Old Dominion, R+L Carriers..."
+                  placeholder="e.g., XPO, Estes, Old Dominion, Buyer Pickup..."
                   placeholderTextColor={themeColors.textMuted}
                   value={freightCarrier}
                   onChangeText={setFreightCarrier}
@@ -1948,10 +1822,10 @@ export default function InvoiceDetailScreen() {
               {/* PRO Number and BOL Number */}
               <View style={styles.shippingInputRow}>
                 <View style={[styles.shippingInputGroup, { flex: 1, marginRight: spacing.sm }]}>
-                  <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>PRO Number</Text>
+                  <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>PRO # (Tracking)</Text>
                   <TextInput
                     style={[styles.shippingInput, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : colors.sand, color: themeColors.textPrimary, borderColor: themeColors.border }]}
-                    placeholder="PRO #..."
+                    placeholder="Optional..."
                     placeholderTextColor={themeColors.textMuted}
                     value={freightProNumber}
                     onChangeText={setFreightProNumber}
@@ -1959,10 +1833,10 @@ export default function InvoiceDetailScreen() {
                   />
                 </View>
                 <View style={[styles.shippingInputGroup, { flex: 1 }]}>
-                  <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>BOL Number</Text>
+                  <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>BOL #</Text>
                   <TextInput
                     style={[styles.shippingInput, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : colors.sand, color: themeColors.textPrimary, borderColor: themeColors.border }]}
-                    placeholder="BOL #..."
+                    placeholder="Optional..."
                     placeholderTextColor={themeColors.textMuted}
                     value={freightBolNumber}
                     onChangeText={setFreightBolNumber}
@@ -1971,187 +1845,24 @@ export default function InvoiceDetailScreen() {
                 </View>
               </View>
 
-              {/* Freight Class */}
+              {/* Est. Delivery */}
               <View style={styles.shippingInputGroup}>
-                <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>Freight Class</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <View style={styles.freightClassOptions}>
-                    {['50', '55', '60', '65', '70', '77.5', '85', '92.5', '100', '110', '125', '150', '175', '200', '250', '300', '400', '500'].map(fc => (
-                      <TouchableOpacity
-                        key={fc}
-                        style={[
-                          styles.freightClassOption,
-                          { borderColor: freightClass === fc ? themeColors.accent : themeColors.border },
-                          freightClass === fc && { backgroundColor: themeColors.accentFaint },
-                        ]}
-                        onPress={() => {
-                          lightTap();
-                          setFreightClass(fc);
-                        }}
-                      >
-                        <Text style={[
-                          styles.freightClassText,
-                          { color: freightClass === fc ? themeColors.accent : themeColors.textSecondary },
-                        ]}>
-                          {fc}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </ScrollView>
-              </View>
-
-              {/* Weight */}
-              <View style={styles.shippingInputGroup}>
-                <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>Weight (lbs)</Text>
+                <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>Est. Delivery Date</Text>
                 <TextInput
                   style={[styles.shippingInput, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : colors.sand, color: themeColors.textPrimary, borderColor: themeColors.border }]}
-                  placeholder="Total shipment weight..."
+                  placeholder="MM/DD/YYYY (optional)"
                   placeholderTextColor={themeColors.textMuted}
-                  value={freightWeightLbs}
-                  onChangeText={setFreightWeightLbs}
-                  keyboardType="numeric"
+                  value={freightEstimatedDelivery}
+                  onChangeText={setFreightEstimatedDelivery}
                 />
               </View>
 
-              {/* Pickup Date and Est. Delivery */}
-              <View style={styles.shippingInputRow}>
-                <View style={[styles.shippingInputGroup, { flex: 1, marginRight: spacing.sm }]}>
-                  <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>Pickup Date</Text>
-                  <TextInput
-                    style={[styles.shippingInput, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : colors.sand, color: themeColors.textPrimary, borderColor: themeColors.border }]}
-                    placeholder="MM/DD/YYYY"
-                    placeholderTextColor={themeColors.textMuted}
-                    value={freightPickupDate}
-                    onChangeText={setFreightPickupDate}
-                  />
-                </View>
-                <View style={[styles.shippingInputGroup, { flex: 1 }]}>
-                  <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>Est. Delivery</Text>
-                  <TextInput
-                    style={[styles.shippingInput, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : colors.sand, color: themeColors.textPrimary, borderColor: themeColors.border }]}
-                    placeholder="MM/DD/YYYY"
-                    placeholderTextColor={themeColors.textMuted}
-                    value={freightEstimatedDelivery}
-                    onChangeText={setFreightEstimatedDelivery}
-                  />
-                </View>
-              </View>
-
-              {/* Pickup Contact Section */}
-              <View style={[styles.contactSection, { borderTopColor: themeColors.borderLight }]}>
-                <Text style={[styles.contactSectionTitle, { color: themeColors.textPrimary }]}>
-                  Pickup Contact
-                </Text>
-                <View style={styles.shippingInputRow}>
-                  <View style={[styles.shippingInputGroup, { flex: 1, marginRight: spacing.sm }]}>
-                    <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>Name</Text>
-                    <TextInput
-                      style={[styles.shippingInput, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : colors.sand, color: themeColors.textPrimary, borderColor: themeColors.border }]}
-                      placeholder="Contact name..."
-                      placeholderTextColor={themeColors.textMuted}
-                      value={pickupContactName}
-                      onChangeText={setPickupContactName}
-                    />
-                  </View>
-                  <View style={[styles.shippingInputGroup, { flex: 1 }]}>
-                    <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>Company</Text>
-                    <TextInput
-                      style={[styles.shippingInput, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : colors.sand, color: themeColors.textPrimary, borderColor: themeColors.border }]}
-                      placeholder="Company name..."
-                      placeholderTextColor={themeColors.textMuted}
-                      value={pickupContactCompany}
-                      onChangeText={setPickupContactCompany}
-                    />
-                  </View>
-                </View>
-                <View style={styles.shippingInputRow}>
-                  <View style={[styles.shippingInputGroup, { flex: 1, marginRight: spacing.sm }]}>
-                    <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>Phone</Text>
-                    <TextInput
-                      style={[styles.shippingInput, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : colors.sand, color: themeColors.textPrimary, borderColor: themeColors.border }]}
-                      placeholder="Phone number..."
-                      placeholderTextColor={themeColors.textMuted}
-                      value={pickupContactPhone}
-                      onChangeText={setPickupContactPhone}
-                      keyboardType="phone-pad"
-                    />
-                  </View>
-                  <View style={[styles.shippingInputGroup, { flex: 1 }]}>
-                    <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>Email</Text>
-                    <TextInput
-                      style={[styles.shippingInput, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : colors.sand, color: themeColors.textPrimary, borderColor: themeColors.border }]}
-                      placeholder="Email address..."
-                      placeholderTextColor={themeColors.textMuted}
-                      value={pickupContactEmail}
-                      onChangeText={setPickupContactEmail}
-                      keyboardType="email-address"
-                      autoCapitalize="none"
-                    />
-                  </View>
-                </View>
-              </View>
-
-              {/* Delivery Contact Section */}
-              <View style={[styles.contactSection, { borderTopColor: themeColors.borderLight }]}>
-                <Text style={[styles.contactSectionTitle, { color: themeColors.textPrimary }]}>
-                  Delivery Contact
-                </Text>
-                <View style={styles.shippingInputRow}>
-                  <View style={[styles.shippingInputGroup, { flex: 1, marginRight: spacing.sm }]}>
-                    <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>Name</Text>
-                    <TextInput
-                      style={[styles.shippingInput, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : colors.sand, color: themeColors.textPrimary, borderColor: themeColors.border }]}
-                      placeholder="Contact name..."
-                      placeholderTextColor={themeColors.textMuted}
-                      value={deliveryContactName}
-                      onChangeText={setDeliveryContactName}
-                    />
-                  </View>
-                  <View style={[styles.shippingInputGroup, { flex: 1 }]}>
-                    <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>Company</Text>
-                    <TextInput
-                      style={[styles.shippingInput, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : colors.sand, color: themeColors.textPrimary, borderColor: themeColors.border }]}
-                      placeholder="Company name..."
-                      placeholderTextColor={themeColors.textMuted}
-                      value={deliveryContactCompany}
-                      onChangeText={setDeliveryContactCompany}
-                    />
-                  </View>
-                </View>
-                <View style={styles.shippingInputRow}>
-                  <View style={[styles.shippingInputGroup, { flex: 1, marginRight: spacing.sm }]}>
-                    <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>Phone</Text>
-                    <TextInput
-                      style={[styles.shippingInput, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : colors.sand, color: themeColors.textPrimary, borderColor: themeColors.border }]}
-                      placeholder="Phone number..."
-                      placeholderTextColor={themeColors.textMuted}
-                      value={deliveryContactPhone}
-                      onChangeText={setDeliveryContactPhone}
-                      keyboardType="phone-pad"
-                    />
-                  </View>
-                  <View style={[styles.shippingInputGroup, { flex: 1 }]}>
-                    <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>Email</Text>
-                    <TextInput
-                      style={[styles.shippingInput, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : colors.sand, color: themeColors.textPrimary, borderColor: themeColors.border }]}
-                      placeholder="Email address..."
-                      placeholderTextColor={themeColors.textMuted}
-                      value={deliveryContactEmail}
-                      onChangeText={setDeliveryContactEmail}
-                      keyboardType="email-address"
-                      autoCapitalize="none"
-                    />
-                  </View>
-                </View>
-              </View>
-
-              {/* Special Instructions */}
+              {/* Notes */}
               <View style={styles.shippingInputGroup}>
-                <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>Special Instructions</Text>
+                <Text style={[styles.shippingInputLabel, { color: themeColors.textSecondary }]}>Notes</Text>
                 <TextInput
                   style={[styles.shippingInput, styles.shippingTextArea, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : colors.sand, color: themeColors.textPrimary, borderColor: themeColors.border }]}
-                  placeholder="Liftgate required, appointment delivery, dock hours, call before delivery..."
+                  placeholder="Any additional info for the buyer..."
                   placeholderTextColor={themeColors.textMuted}
                   value={freightSpecialInstructions}
                   onChangeText={setFreightSpecialInstructions}
@@ -2182,117 +1893,13 @@ export default function InvoiceDetailScreen() {
                 )}
               </TouchableOpacity>
             </ScrollView>
+                </View>
+              </TouchableWithoutFeedback>
+            </KeyboardAvoidingView>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
-      {/* Upload BOL/Photos Modal - for buyer pre-delivery upload */}
-      <Modal
-        visible={showUploadBolModal}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setShowUploadBolModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { paddingBottom: insets.bottom + spacing.lg, backgroundColor: themeColors.surface }]}>
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: themeColors.textPrimary }]}>Upload Documents</Text>
-              <TouchableOpacity onPress={() => setShowUploadBolModal(false)}>
-                <Feather name="x" size={24} color={themeColors.textPrimary} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={[styles.modalSubtitle, { color: themeColors.textSecondary }]}>
-              Upload your signed Bill of Lading and shipping photos to document the delivery condition.
-            </Text>
-
-            {/* Signed BOL Upload */}
-            <View style={styles.uploadSection}>
-              <Text style={[styles.uploadLabel, { color: themeColors.textPrimary }]}>Signed Bill of Lading</Text>
-              <Text style={[styles.uploadDescription, { color: themeColors.textMuted }]}>
-                Upload a photo of the signed BOL from the carrier
-              </Text>
-              {bolImage ? (
-                <View style={styles.uploadedImageContainer}>
-                  <Image source={bolImage} style={styles.uploadedImage} contentFit="cover" />
-                  <TouchableOpacity
-                    style={styles.removeImageButton}
-                    onPress={() => setBolImage(null)}
-                  >
-                    <Feather name="x" size={16} color={colors.white} />
-                  </TouchableOpacity>
-                  <View style={styles.imageLabel}>
-                    <Feather name="file-text" size={12} color={colors.accent} />
-                    <Text style={styles.imageLabelText}>Signed BOL</Text>
-                  </View>
-                </View>
-              ) : (
-                <TouchableOpacity style={styles.uploadButton} onPress={showBolOptions}>
-                  <Feather name="camera" size={24} color={colors.accent} />
-                  <Text style={styles.uploadButtonText}>Add Signed BOL</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* Shipping Photos Upload */}
-            <View style={styles.uploadSection}>
-              <Text style={[styles.uploadLabel, { color: themeColors.textPrimary }]}>Shipping Photos (Optional)</Text>
-              <Text style={[styles.uploadDescription, { color: themeColors.textMuted }]}>
-                Document the condition upon arrival (max 5 photos)
-              </Text>
-              <View style={styles.damagePhotosGrid}>
-                {shippingPhotos.map((photo, index) => (
-                  <View key={index} style={styles.damagePhotoContainer}>
-                    <Image source={photo} style={styles.damagePhoto} contentFit="cover" />
-                    <TouchableOpacity
-                      style={styles.removeDamageButton}
-                      onPress={() => removeShippingPhoto(index)}
-                    >
-                      <Feather name="x" size={14} color={colors.white} />
-                    </TouchableOpacity>
-                  </View>
-                ))}
-                {shippingPhotos.length < 5 && (
-                  <TouchableOpacity
-                    style={[styles.addDamageButton, { borderColor: themeColors.accent }]}
-                    onPress={pickShippingPhoto}
-                  >
-                    <Feather name="plus" size={24} color={themeColors.accent} />
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-
-            <View style={styles.shippingNote}>
-              <Feather name="info" size={16} color={themeColors.textMuted} />
-              <Text style={[styles.shippingNoteText, { color: themeColors.textMuted }]}>
-                These documents will be saved to your invoice record. You can also upload them during delivery confirmation.
-              </Text>
-            </View>
-
-            <TouchableOpacity
-              style={[
-                styles.submitButton,
-                (uploadBolAndPhotosMutation.isPending || isUploading || (!bolImage && shippingPhotos.length === 0)) && styles.submitButtonDisabled
-              ]}
-              onPress={handleSubmitUploadBol}
-              disabled={uploadBolAndPhotosMutation.isPending || isUploading || (!bolImage && shippingPhotos.length === 0)}
-            >
-              {uploadBolAndPhotosMutation.isPending || isUploading ? (
-                <View style={styles.loadingRow}>
-                  <ActivityIndicator color={colors.white} />
-                  <Text style={styles.submitButtonText}>Uploading...</Text>
-                </View>
-              ) : (
-                <>
-                  <Feather name="upload" size={20} color={colors.white} />
-                  <Text style={styles.submitButtonText}>Upload Documents</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -2420,7 +2027,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
     marginLeft: spacing.xs,
   },
   card: {
@@ -2667,6 +2274,7 @@ const styles = StyleSheet.create({
   sellerRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing.md,
   },
   sellerAvatar: {
     width: 44,
@@ -2683,7 +2291,6 @@ const styles = StyleSheet.create({
   },
   sellerInfo: {
     flex: 1,
-    marginLeft: spacing.md,
   },
   sellerName: {
     fontSize: fontSize.base,
@@ -2864,6 +2471,10 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  keyboardAvoidingView: {
+    width: '100%',
     justifyContent: 'flex-end',
   },
   modalContent: {
@@ -3181,53 +2792,5 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: fontSize.sm,
     lineHeight: 20,
-  },
-
-  // Freight Class Options
-  freightClassScroll: {
-    marginHorizontal: -spacing.lg,
-    paddingHorizontal: spacing.lg,
-  },
-  freightClassOptions: {
-    flexDirection: 'row',
-    gap: spacing.xs,
-  },
-  freightClassOption: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    minWidth: 48,
-    alignItems: 'center',
-  },
-  freightClassText: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.medium,
-  },
-
-  // Modal Scroll Wrapper (for long forms like freight shipping)
-  modalScrollWrapper: {
-    maxHeight: '90%',
-    borderTopLeftRadius: borderRadius.xl,
-    borderTopRightRadius: borderRadius.xl,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-  },
-  modalScrollContent: {
-    flex: 1,
-  },
-
-  // Contact Section Styles
-  contactSection: {
-    marginTop: spacing.md,
-    paddingTop: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: colors.borderLight,
-  },
-  contactSectionTitle: {
-    fontSize: fontSize.base,
-    fontWeight: fontWeight.semibold,
-    marginBottom: spacing.md,
   },
 });

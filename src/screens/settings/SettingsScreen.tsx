@@ -86,7 +86,7 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.semibold,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
     marginLeft: spacing.xs,
   },
   sectionHint: {

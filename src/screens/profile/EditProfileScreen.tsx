@@ -15,15 +15,20 @@ import { Image } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
+import { ProfileStackParamList } from '../../navigation/types';
+import { uploadAvatar } from '../../utils/avatarUpload';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 import { mediumTap } from '../../utils/haptics';
 
+type NavigationProp = NativeStackNavigationProp<ProfileStackParamList>;
+
 export default function EditProfileScreen() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<NavigationProp>();
   const insets = useSafeAreaInsets();
   const { profile, refreshProfile } = useAuth();
   const { colors, isDark } = useTheme();
@@ -32,7 +37,6 @@ export default function EditProfileScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [fullName, setFullName] = useState('');
   const [companyName, setCompanyName] = useState('');
-  const [phone, setPhone] = useState('');
   const [bio, setBio] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
@@ -40,7 +44,6 @@ export default function EditProfileScreen() {
     if (profile) {
       setFullName(profile.full_name || '');
       setCompanyName(profile.company_name || '');
-      setPhone(profile.phone || '');
       setBio(profile.bio || '');
       setAvatarUrl(profile.avatar_url);
     }
@@ -55,40 +58,28 @@ export default function EditProfileScreen() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.8,
     });
 
     if (!result.canceled && result.assets[0]) {
-      await uploadAvatar(result.assets[0].uri);
+      await handleAvatarUpload(result.assets[0].uri);
     }
   };
 
-  const uploadAvatar = async (uri: string) => {
+  const handleAvatarUpload = async (uri: string) => {
     if (!profile) return;
 
     setIsLoading(true);
     try {
-      const fileName = `${profile.id}-${Date.now()}.jpg`;
-      const response = await fetch(uri);
-      const blob = await response.blob();
-
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(fileName, blob, {
-          contentType: 'image/jpeg',
-          upsert: true,
-        });
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('avatars')
-        .getPublicUrl(fileName);
-
-      setAvatarUrl(publicUrl);
+      const result = await uploadAvatar(uri, profile.id);
+      if (result.error) {
+        Alert.alert('Error', 'Failed to upload profile picture. Please try again.');
+        return;
+      }
+      setAvatarUrl(result.url);
     } catch (error) {
       console.error('Error uploading avatar:', error);
       Alert.alert('Error', 'Failed to upload profile picture. Please try again.');
@@ -109,7 +100,6 @@ export default function EditProfileScreen() {
         .update({
           full_name: fullName.trim() || null,
           company_name: companyName.trim() || null,
-          phone: phone.trim() || null,
           bio: bio.trim() || null,
           avatar_url: avatarUrl,
           updated_at: new Date().toISOString(),
@@ -131,7 +121,6 @@ export default function EditProfileScreen() {
   const hasChanges =
     fullName !== (profile?.full_name || '') ||
     companyName !== (profile?.company_name || '') ||
-    phone !== (profile?.phone || '') ||
     bio !== (profile?.bio || '') ||
     avatarUrl !== profile?.avatar_url;
 
@@ -200,14 +189,35 @@ export default function EditProfileScreen() {
 
             <View style={styles.inputGroup}>
               <Text style={[styles.inputLabel, { color: colors.textMuted }]}>Phone Number</Text>
-              <TextInput
-                style={[styles.input, { color: colors.textPrimary, borderColor: colors.border }]}
-                value={phone}
-                onChangeText={setPhone}
-                placeholder="Enter phone number"
-                placeholderTextColor={colors.textLight}
-                keyboardType="phone-pad"
-              />
+              {profile?.phone_verified ? (
+                <View style={styles.verifiedPhoneRow}>
+                  <Text style={[styles.verifiedPhoneText, { color: colors.textPrimary }]}>
+                    {profile.phone}
+                  </Text>
+                  <View style={[styles.verifiedBadge, { backgroundColor: colors.successLight }]}>
+                    <Feather name="check-circle" size={12} color={colors.success} />
+                    <Text style={[styles.verifiedBadgeText, { color: colors.success }]}>Verified</Text>
+                  </View>
+                </View>
+              ) : (
+                <>
+                  <TouchableOpacity
+                    style={[styles.verifyButton, { backgroundColor: colors.accentFaint, borderColor: colors.accent }]}
+                    onPress={() => {
+                      mediumTap();
+                      navigation.navigate('PhoneVerification');
+                    }}
+                  >
+                    <Feather name="smartphone" size={16} color={colors.accent} />
+                    <Text style={[styles.verifyButtonText, { color: colors.accent }]}>
+                      Verify Phone Number
+                    </Text>
+                  </TouchableOpacity>
+                  <Text style={[styles.verifyHint, { color: colors.textMuted }]}>
+                    Required to place bids and enable SMS notifications
+                  </Text>
+                </>
+              )}
             </View>
           </View>
         </View>
@@ -297,7 +307,7 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.semibold,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
     marginLeft: spacing.xs,
   },
   card: {
@@ -325,6 +335,47 @@ const styles = StyleSheet.create({
   divider: {
     height: 1,
     marginLeft: spacing.lg,
+  },
+  verifiedPhoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.sm,
+  },
+  verifiedPhoneText: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.medium,
+  },
+  verifiedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.full,
+  },
+  verifiedBadgeText: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.medium,
+  },
+  verifyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    marginTop: spacing.sm,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+  },
+  verifyButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+  },
+  verifyHint: {
+    fontSize: fontSize.xs,
+    marginTop: spacing.sm,
+    lineHeight: 16,
   },
   saveButton: {
     paddingVertical: spacing.lg,

@@ -49,48 +49,51 @@ export const lightColors = {
 
   // Surfaces
   surface: '#ffffff',
+
+  // Input fields
+  inputBackground: '#ffffff',
 } as const;
 
-// Dark mode colors
+// Dark mode colors - WCAG AA compliant contrast ratios
 export const darkColors = {
   // Primary: Inverted for dark mode
-  primary: '#f8fafc',
-  primaryLight: '#e2e8f0',
+  primary: '#ffffff',
+  primaryLight: '#f1f5f9',
 
-  // Accent: Slightly brighter blue for dark backgrounds
-  accent: '#3b82f6',
-  accentLight: '#60a5fa',
-  accentMuted: '#93c5fd',
+  // Accent: Brighter blue for dark backgrounds (4.5:1+ contrast)
+  accent: '#60a5fa',
+  accentLight: '#93c5fd',
+  accentMuted: '#bfdbfe',
   accentFaint: '#1e3a5f',
 
-  // Secondary: Steel blue (lighter for dark mode)
-  steel: '#94a3b8',
-  steelLight: '#cbd5e1',
+  // Secondary: Steel blue (lighter for dark mode readability)
+  steel: '#e2e8f0',
+  steelLight: '#f1f5f9',
 
   // Neutral earth tones (dark variants)
   background: '#0f172a',
   sand: '#1e293b',
   stone: '#334155',
-  warmGray: '#94a3b8',
+  warmGray: '#e2e8f0',
 
-  // Text (inverted for dark mode)
-  foreground: '#f8fafc',
-  textPrimary: '#f8fafc',
-  textSecondary: '#cbd5e1',
-  textMuted: '#94a3b8',
-  textLight: '#64748b',
+  // Text - High contrast for accessibility (7:1+ for primary, 4.5:1+ for secondary)
+  foreground: '#ffffff',
+  textPrimary: '#ffffff',
+  textSecondary: '#e2e8f0',
+  textMuted: '#cbd5e1',
+  textLight: '#94a3b8',
 
-  // States (adjusted for dark backgrounds)
-  success: '#10b981',
+  // States (adjusted for dark backgrounds - brighter for visibility)
+  success: '#34d399',
   successLight: '#064e3b',
-  warning: '#f59e0b',
+  warning: '#fbbf24',
   warningLight: '#78350f',
-  error: '#ef4444',
+  error: '#f87171',
   errorLight: '#7f1d1d',
 
-  // Borders (darker variants)
-  border: '#334155',
-  borderLight: '#1e293b',
+  // Borders (visible on dark backgrounds)
+  border: '#475569',
+  borderLight: '#334155',
 
   // Common
   white: '#1e293b',  // Card/surface color in dark mode
@@ -99,12 +102,18 @@ export const darkColors = {
 
   // Surfaces
   surface: '#1e293b',
+
+  // Input fields
+  inputBackground: '#334155',
 } as const;
 
 // Default export for backward compatibility
 export const colors = lightColors;
 
-export type ThemeColors = typeof lightColors;
+// ThemeColors uses string for color values to allow both light and dark themes
+export type ThemeColors = {
+  [K in keyof typeof lightColors]: string;
+};
 
 export const spacing = {
   xs: 4,
@@ -128,16 +137,20 @@ export const borderRadius = {
   full: 9999,
 } as const;
 
+// iOS Dynamic Type scale aligned sizes
 export const fontSize = {
-  xs: 11,
-  sm: 13,
-  base: 15,
-  lg: 17,
-  xl: 20,
-  '2xl': 24,
-  '3xl': 30,
-  '4xl': 36,
+  xs: 12,    // caption2
+  sm: 13,    // caption1
+  base: 15,  // subheadline
+  lg: 17,    // body (iOS default)
+  xl: 20,    // title3
+  '2xl': 22, // title2
+  '3xl': 28, // title1
+  '4xl': 34, // largeTitle
 } as const;
+
+// Apple HIG minimum touch target size
+export const minTouchTarget = 44;
 
 export const fontWeight = {
   normal: '400' as const,

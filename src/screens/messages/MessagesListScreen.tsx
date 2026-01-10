@@ -1,6 +1,5 @@
 import React from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
-import { Image } from 'expo-image';
 import { useNavigation, NavigationProp } from '@react-navigation/native';
 import { MessagesStackParamList } from '../../navigation/types';
 import { useQuery } from '@tanstack/react-query';
@@ -11,6 +10,7 @@ import { ConversationWithDetails } from '../../types/database';
 import { formatRelativeTime } from '../../utils/formatters';
 import { colors, spacing, borderRadius, fontSize, fontWeight } from '../../constants/theme';
 import { Feather } from '@expo/vector-icons';
+import Avatar from '../../components/Avatar';
 
 export default function MessagesListScreen() {
   const navigation = useNavigation<NavigationProp<MessagesStackParamList>>();
@@ -30,7 +30,7 @@ export default function MessagesListScreen() {
           messages(id, content, sender_id, is_read, created_at)
         `)
         .or(`participant_1_id.eq.${user.id},participant_2_id.eq.${user.id}`)
-        .order('last_message_at', { ascending: false });
+        .order('last_message_at', { ascending: false, nullsFirst: false });
 
       if (error) throw error;
 
@@ -84,12 +84,7 @@ export default function MessagesListScreen() {
           conversationId: item.id
         })}
       >
-        <Image
-          source={item.other_participant?.avatar_url ? { uri: item.other_participant.avatar_url } : require('../../../assets/avatar-placeholder.png')}
-          style={[styles.avatar, { backgroundColor: themeColors.stone }]}
-          contentFit="cover"
-          placeholder={require('../../../assets/avatar-placeholder.png')}
-        />
+        <Avatar url={item.other_participant?.avatar_url} size="md" />
         <View style={styles.conversationContent}>
           <View style={styles.conversationHeader}>
             <Text style={[styles.participantName, { color: themeColors.textPrimary }]} numberOfLines={1}>
@@ -100,28 +95,28 @@ export default function MessagesListScreen() {
             </Text>
           </View>
 
-          {item.listing?.title && (
+          {item.listing && item.listing.title ? (
             <Text style={[styles.listingTitle, { color: themeColors.accent }]} numberOfLines={1}>
               {`Re: ${item.listing.title}`}
             </Text>
-          )}
+          ) : null}
 
           <View style={styles.messageRow}>
             <Text
               style={[
                 styles.lastMessage,
                 { color: (item.unread_count ?? 0) > 0 ? themeColors.textPrimary : themeColors.textMuted },
-                (item.unread_count ?? 0) > 0 && styles.unreadMessage,
+                (item.unread_count ?? 0) > 0 ? styles.unreadMessage : undefined,
               ]}
               numberOfLines={1}
             >
               {item.last_message?.content || 'No messages yet'}
             </Text>
-            {item.unread_count && item.unread_count > 0 && (
+            {item.unread_count && item.unread_count > 0 ? (
               <View style={[styles.unreadBadge, { backgroundColor: themeColors.accent }]}>
                 <Text style={styles.unreadCount}>{item.unread_count}</Text>
               </View>
-            )}
+            ) : null}
           </View>
         </View>
       </TouchableOpacity>
@@ -176,7 +171,9 @@ const styles = StyleSheet.create({
   },
   conversationItem: {
     flexDirection: 'row',
+    alignItems: 'center',
     padding: spacing.lg,
+    gap: spacing.md,
   },
   avatar: {
     width: 50,

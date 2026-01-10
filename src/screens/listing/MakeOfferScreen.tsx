@@ -24,13 +24,14 @@ import { HomeStackParamList } from '../../navigation/types';
 import { formatCurrency } from '../../utils/formatters';
 import { colors, spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
 import { mediumTap, successFeedback, errorFeedback } from '../../utils/haptics';
+import { API_URL } from '../../constants/config';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'MakeOffer'>;
 
 export default function MakeOfferScreen({ route, navigation }: Props) {
   const { listingId, parentOfferId, suggestedAmount } = route.params;
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const { colors: themeColors, isDark } = useTheme();
   const queryClient = useQueryClient();
 
@@ -159,124 +160,64 @@ export default function MakeOfferScreen({ route, navigation }: Props) {
   // Make offer mutation
   const makeOfferMutation = useMutation({
     mutationFn: async () => {
-      if (!user || !listing) throw new Error('Not authenticated');
+      if (!user || !listing || !session) throw new Error('Not authenticated');
 
       const amount = parseFloat(offerAmount);
       if (isNaN(amount) || amount <= 0) {
         throw new Error('Please enter a valid offer amount');
       }
 
-      // Check against auto-decline price if set
+      // Check against auto-decline price if set (client-side validation)
       if (listing.auto_decline_price && amount < listing.auto_decline_price) {
         throw new Error(`Offer must be at least ${formatCurrency(listing.auto_decline_price)}`);
       }
 
-      // Ensure buyer profile exists (foreign key requirement)
-      const { data: existingProfile } = await supabase
-        .from('profiles')
-        .select('id, email')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      if (!existingProfile) {
-        // Create profile if it doesn't exist using upsert
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .upsert({
-            id: user.id,
-            email: user.email,
-            full_name: user.user_metadata?.full_name || null,
-          }, { onConflict: 'id' });
-
-        if (profileError) {
-          throw new Error('Your profile could not be created. Please contact support or try logging out and back in.');
-        }
-      }
-
-      // Calculate expiration (48 hours from now)
-      const expiresAt = new Date();
-      expiresAt.setHours(expiresAt.getHours() + 48);
-
-      // For all offers, buyer_id and seller_id stay the same as the listing relationship
-      // buyer_id = the person buying (original offer maker or their side)
-      // seller_id = the listing owner
-      const offerBuyerId = isCounterOffer
-        ? (parentOffer?.buyer as any)?.id  // Keep original buyer for the entire offer chain
-        : user.id;
-      const offerSellerId = listing.seller_id;
-
-      // Determine who is making this counter offer (for notification purposes)
-      const currentUserIsSeller = user.id === listing.seller_id;
-
-      const { data, error } = await supabase
-        .from('offers')
-        .insert({
-          listing_id: listingId,
-          buyer_id: offerBuyerId,
-          seller_id: offerSellerId,
-          amount: amount,
-          message: message.trim() || null,
-          status: 'pending',
-          expires_at: expiresAt.toISOString(),
-          ...(parentOfferId && { parent_offer_id: parentOfferId }),
-        })
-        .select()
-        .single();
-
-      if (error) {
-        throw error;
-      }
-
-      // If this is a counter offer, update the parent offer status to 'countered'
       if (isCounterOffer && parentOfferId) {
-        const { error: updateError } = await supabase
-          .from('offers')
-          .update({ status: 'countered', responded_at: new Date().toISOString() })
-          .eq('id', parentOfferId);
+        // Use the respond endpoint for counter offers
+        const response = await fetch(`${API_URL}/offers/respond`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            offerId: parentOfferId,
+            action: 'counter',
+            counterAmount: amount,
+            counterMessage: message.trim() || undefined,
+          }),
+        });
 
-        if (updateError) {
-          // Don't throw - the counter offer was still created
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to send counter offer');
         }
-      }
 
-      // Create notification for the other party
-      // For counter offers: notify whoever DIDN'T make the counter (the other party)
-      // For new offers: notify the seller
-      let notifyUserId: string;
-      let notifBody: string;
-
-      if (isCounterOffer) {
-        // Counter offer: notify the OTHER party
-        if (currentUserIsSeller) {
-          // Seller is countering → notify the buyer
-          notifyUserId = (parentOffer?.buyer as any)?.id;
-          notifBody = `The seller countered with ${formatCurrency(amount)} on "${listing.title}"`;
-        } else {
-          // Buyer is countering → notify the seller
-          notifyUserId = listing.seller_id;
-          notifBody = `The buyer countered with ${formatCurrency(amount)} on "${listing.title}"`;
-        }
+        return result;
       } else {
-        // New offer: notify the seller
-        notifyUserId = listing.seller_id;
-        notifBody = `You received an offer of ${formatCurrency(amount)} on "${listing.title}"`;
+        // Use the submit endpoint for new offers
+        const response = await fetch(`${API_URL}/offers/submit`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            listingId,
+            amount,
+            message: message.trim() || undefined,
+          }),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to submit offer');
+        }
+
+        return result;
       }
-
-      const notifType = isCounterOffer ? 'offer_countered' : 'new_offer';
-      const notifTitle = isCounterOffer
-        ? `Counter offer: ${formatCurrency(amount)}`
-        : `New offer: ${formatCurrency(amount)}`;
-
-      await supabase.from('notifications').insert({
-        user_id: notifyUserId,
-        type: notifType,
-        title: notifTitle,
-        body: notifBody,
-        listing_id: listingId,
-        offer_id: data.id,
-      });
-
-      return data;
     },
     onSuccess: () => {
       successFeedback();
@@ -352,10 +293,16 @@ export default function MakeOfferScreen({ route, navigation }: Props) {
       <View style={[styles.container, { backgroundColor: themeColors.background }]}>
         {/* Header */}
         <View style={[styles.header, { paddingTop: insets.top + spacing.sm, backgroundColor: themeColors.surface, borderBottomColor: themeColors.border }]}>
-          <TouchableOpacity style={styles.closeIcon} onPress={() => navigation.goBack()}>
+          <TouchableOpacity
+            style={styles.closeIcon}
+            onPress={() => navigation.goBack()}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityLabel="Close"
+            accessibilityRole="button"
+          >
             <Feather name="x" size={24} color={themeColors.textPrimary} />
           </TouchableOpacity>
-          <Text style={[styles.headerTitle, { color: themeColors.textPrimary }]}>
+          <Text style={[styles.headerTitle, { color: themeColors.textPrimary }]} accessibilityRole="header">
             {isCounterOffer ? 'Counter Offer' : 'Make an Offer'}
           </Text>
           <View style={styles.headerSpacer} />
@@ -402,10 +349,16 @@ export default function MakeOfferScreen({ route, navigation }: Props) {
     >
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm, backgroundColor: themeColors.surface, borderBottomColor: themeColors.border }]}>
-        <TouchableOpacity style={styles.closeIcon} onPress={() => navigation.goBack()}>
+        <TouchableOpacity
+          style={styles.closeIcon}
+          onPress={() => navigation.goBack()}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          accessibilityLabel="Close"
+          accessibilityRole="button"
+        >
           <Feather name="x" size={24} color={themeColors.textPrimary} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: themeColors.textPrimary }]}>
+        <Text style={[styles.headerTitle, { color: themeColors.textPrimary }]} accessibilityRole="header">
           {isCounterOffer ? 'Counter Offer' : 'Make an Offer'}
         </Text>
         <View style={styles.headerSpacer} />
@@ -794,8 +747,8 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   closeIcon: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
   },

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -8,6 +8,7 @@ import { colors } from '../constants/theme';
 
 import AuthNavigator from './AuthNavigator';
 import MainNavigator from './MainNavigator';
+import OnboardingScreen from '../screens/onboarding/OnboardingScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -23,11 +24,29 @@ function LoadingScreen() {
 }
 
 export default function RootNavigator() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, needsOnboarding, profile, completeOnboarding, skipOnboarding } = useAuth();
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
 
-  // Show loading screen while checking auth state
-  if (isLoading) {
+  // Show loading screen while checking auth state OR waiting for profile to load
+  // This prevents the "cutting in" effect where main screen shows briefly before onboarding
+  if (isLoading || (isAuthenticated && !profile)) {
     return <LoadingScreen />;
+  }
+
+  // Show onboarding for new users who need to complete their profile
+  if (isAuthenticated && needsOnboarding && !onboardingDismissed) {
+    return (
+      <OnboardingScreen
+        onComplete={async () => {
+          await completeOnboarding();
+          setOnboardingDismissed(true);
+        }}
+        onSkip={async () => {
+          await skipOnboarding();
+          setOnboardingDismissed(true);
+        }}
+      />
+    );
   }
 
   return (
