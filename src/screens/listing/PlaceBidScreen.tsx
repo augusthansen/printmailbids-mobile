@@ -103,8 +103,9 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
   // The actual minimum the user must bid:
   // - If winning: must be higher than their current max bid
   // - If outbid or no bid: must be at least the minimum bid (current price + increment)
+  // - Always ensure it's at least minimumBid to handle stale bid status data
   const requiredMinimum = userIsWinning
-    ? userCurrentMaxBid + getBidIncrement(userCurrentMaxBid)
+    ? Math.max(userCurrentMaxBid + getBidIncrement(userCurrentMaxBid), minimumBid)
     : minimumBid;
 
   // Check if reserve is met
