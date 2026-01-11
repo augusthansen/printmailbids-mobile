@@ -64,6 +64,7 @@ export interface Profile {
   notify_email: boolean;
   notify_push: boolean;
   notify_sms: boolean;
+  expo_push_token: string | null;
 
   // Custom Commission
   custom_buyer_premium_percent: number | null;

@@ -380,7 +380,11 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
 
   const currentPrice = isAuction ? (listing.current_price || listing.starting_price) : listing.fixed_price;
   const hasReserve = listing.reserve_price && (!listing.current_price || listing.current_price < listing.reserve_price);
-  const reserveMet = listing.reserve_price && listing.current_price && listing.current_price >= listing.reserve_price;
+  // Reserve is "met" if there's no reserve OR if current price >= reserve price
+  const reserveMet = !listing.reserve_price || (listing.current_price && listing.current_price >= listing.reserve_price);
+  // User is high bidder if their bid status is 'winning', but only truly "winning" if reserve is met
+  const userIsHighBidder = listing.my_bid?.status === 'winning';
+  const userIsWinning = userIsHighBidder && reserveMet;
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
@@ -559,22 +563,24 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
             {listing.my_bid && (
               <View style={[
                 styles.yourBidRow,
-                listing.my_bid.status === 'winning'
+                userIsHighBidder
                   ? [styles.winningBid, { backgroundColor: themeColors.successLight }]
                   : [styles.outbidBid, { backgroundColor: themeColors.errorLight }]
               ]}>
                 <Feather
-                  name={listing.my_bid.status === 'winning' ? 'award' : 'alert-circle'}
+                  name={userIsHighBidder ? 'award' : 'alert-circle'}
                   size={16}
-                  color={listing.my_bid.status === 'winning' ? themeColors.success : themeColors.error}
+                  color={userIsHighBidder ? themeColors.success : themeColors.error}
                 />
                 <View style={styles.yourBidTextContainer}>
                   <Text style={[
                     styles.yourBidText,
-                    { color: listing.my_bid.status === 'winning' ? themeColors.success : themeColors.error }
+                    { color: userIsHighBidder ? themeColors.success : themeColors.error }
                   ]}>
-                    {listing.my_bid.status === 'winning'
-                      ? `You're winning at ${formatCurrency(listing.my_bid.amount)}`
+                    {userIsHighBidder
+                      ? (userIsWinning
+                        ? `You're winning at ${formatCurrency(listing.my_bid.amount)}`
+                        : `You're the high bidder at ${formatCurrency(listing.my_bid.amount)}`)
                       : `You've been outbid (your bid: ${formatCurrency(listing.my_bid.amount)})`
                     }
                   </Text>

@@ -18,7 +18,9 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
-import { mediumTap } from '../../utils/haptics';
+import { mediumTap, successFeedback, errorFeedback } from '../../utils/haptics';
+import { scheduleLocalNotification } from '../../utils/pushNotifications';
+import { API_URL } from '../../constants/config';
 
 interface NotificationPreferences {
   // Channels
@@ -225,6 +227,86 @@ export default function NotificationSettingsScreen() {
         </View>
       )}
 
+      {/* Test Notification */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Test Notifications</Text>
+        <TouchableOpacity
+          style={[styles.testButton, { backgroundColor: colors.accent }]}
+          onPress={async () => {
+            mediumTap();
+            try {
+              await scheduleLocalNotification(
+                'Test Notification',
+                'Push notifications are working! 🎉',
+                { type: 'test' }
+              );
+              successFeedback();
+              Alert.alert('Sent!', 'Check your notification center.');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to send test notification. Make sure notifications are enabled in your device settings.');
+            }
+          }}
+        >
+          <Feather name="bell" size={18} color="#ffffff" />
+          <Text style={styles.testButtonText}>Send Local Test</Text>
+        </TouchableOpacity>
+        <Text style={[styles.testHint, { color: colors.textMuted }]}>
+          Tests local notifications on your device.
+        </Text>
+
+        <TouchableOpacity
+          style={[styles.testButton, { backgroundColor: colors.accent, marginTop: spacing.md }]}
+          onPress={async () => {
+            mediumTap();
+            try {
+              const { data: { session } } = await supabase.auth.getSession();
+              if (!session?.access_token) {
+                Alert.alert('Error', 'Not authenticated');
+                return;
+              }
+
+              const response = await fetch(`${API_URL}/test/push-notification`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${session.access_token}`,
+                },
+                body: JSON.stringify({ type: 'outbid', listingTitle: 'Test Equipment' }),
+              });
+
+              const result = await response.json();
+              console.log('[Test Push] Response:', result);
+
+              if (response.ok && result.success) {
+                if (result.pushSent) {
+                  successFeedback();
+                  Alert.alert('Sent!', 'Push notification sent via Expo. Check your device.');
+                } else {
+                  errorFeedback();
+                  Alert.alert(
+                    'Push Not Sent',
+                    `Notification created but push failed.\n\nReason: ${result.error || 'Unknown'}\n\nCheck that notify_push is enabled and expo_push_token is saved in your profile.`
+                  );
+                }
+              } else {
+                errorFeedback();
+                Alert.alert('Error', result.error || 'Failed to send server push notification');
+              }
+            } catch (error) {
+              console.error('[Test Push] Error:', error);
+              errorFeedback();
+              Alert.alert('Error', 'Failed to send server push notification');
+            }
+          }}
+        >
+          <Feather name="send" size={18} color="#ffffff" />
+          <Text style={styles.testButtonText}>Send Server Push</Text>
+        </TouchableOpacity>
+        <Text style={[styles.testHint, { color: colors.textMuted }]}>
+          Tests the full push notification flow via your server and Expo.
+        </Text>
+      </View>
+
       {/* Quiet Hours (Future Feature) */}
       <View style={styles.section}>
         <View style={[styles.comingSoonCard, { backgroundColor: isDark ? colors.sand : '#ffffff' }]}>
@@ -397,5 +479,25 @@ const styles = StyleSheet.create({
   comingSoonText: {
     fontSize: fontSize.sm,
     lineHeight: 20,
+  },
+  testButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.lg,
+    borderRadius: borderRadius.xl,
+    ...shadows.sm,
+  },
+  testButtonText: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.semibold,
+    color: '#ffffff',
+  },
+  testHint: {
+    fontSize: fontSize.xs,
+    marginTop: spacing.sm,
+    marginLeft: spacing.xs,
+    lineHeight: 16,
   },
 });

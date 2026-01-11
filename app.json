@@ -43,7 +43,9 @@
         "NSPrivacyAccessedAPITypes": [
           {
             "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
-            "NSPrivacyAccessedAPITypeReasons": ["CA92.1"]
+            "NSPrivacyAccessedAPITypeReasons": [
+              "CA92.1"
+            ]
           }
         ]
       }
@@ -63,7 +65,11 @@
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "VIBRATE",
-        "RECEIVE_BOOT_COMPLETED"
+        "RECEIVE_BOOT_COMPLETED",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
     "web": {
@@ -94,15 +100,15 @@
         }
       ]
     ],
+    "owner": "augusthansen",
     "extra": {
       "eas": {
-        "projectId": "YOUR_EAS_PROJECT_ID"
+        "projectId": "b4ede531-5a40-4e91-b4ad-da3142170e95"
       }
     },
-    "owner": "printmailbids",
     "updates": {
       "enabled": true,
-      "url": "https://u.expo.dev/YOUR_EAS_PROJECT_ID",
+      "url": "https://u.expo.dev/b4ede531-5a40-4e91-b4ad-da3142170e95",
       "fallbackToCacheTimeout": 0,
       "checkAutomatically": "ON_LOAD"
     }

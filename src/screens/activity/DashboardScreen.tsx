@@ -105,14 +105,16 @@ export default function DashboardScreen() {
   // Fetch buyer stats
   const { data: buyerStats, isLoading: loadingBuyer, refetch: refetchBuyer } = useQuery<BuyerStats>({
     queryKey: ['buyerStats', user?.id],
+    staleTime: 0, // Always refetch to ensure fresh bid statuses
+    refetchOnMount: 'always',
     queryFn: async () => {
       if (!user) return { activeBids: 0, winningBids: 0, pendingOffers: 0, acceptedOffers: 0, unpaidInvoices: 0, totalPurchases: 0, pipelineValue: 0, activeTransactions: 0, activeTransactionsAmount: 0 };
 
       const [bidsResult, pendingOffersResult, acceptedOffersResult, invoicesResult, paidInvoicesResult, activeTransactionsResult] = await Promise.all([
-        // Active and winning bids - include listing_id to count unique listings
+        // Active and winning bids - include listing to check if auction is still active
         supabase
           .from('bids')
-          .select('id, status, amount, listing_id')
+          .select('id, status, amount, listing_id, listing:listings(id, status)')
           .eq('bidder_id', user.id)
           .in('status', ['active', 'winning']),
         // Pending offers (awaiting seller response)
@@ -148,9 +150,31 @@ export default function DashboardScreen() {
       ]);
 
       const bids = bidsResult.data || [];
+
+      // Filter bids to only include those on active listings
+      // A bid is only truly "winning" if:
+      // 1. The bid status is 'winning'
+      // 2. The listing is still active (not ended, sold, etc.)
+      // Note: Supabase may return joined data as array or object depending on the relationship
+      type ListingData = { id: string; status: string } | { id: string; status: string }[] | null;
+      const getListingStatus = (listing: ListingData): string | undefined => {
+        if (!listing) return undefined;
+        if (Array.isArray(listing)) return listing[0]?.status;
+        return listing.status;
+      };
+
+      const activeBidsData = bids.filter(b => {
+        const listingStatus = getListingStatus(b.listing as ListingData);
+        return b.status === 'active' && listingStatus === 'active';
+      });
+      const winningBidsData = bids.filter(b => {
+        const listingStatus = getListingStatus(b.listing as ListingData);
+        return b.status === 'winning' && listingStatus === 'active';
+      });
+
       // Count unique listings, not total bids (user can have multiple bids on same listing)
-      const uniqueActiveListings = new Set(bids.filter(b => b.status === 'active').map(b => b.listing_id));
-      const uniqueWinningListings = new Set(bids.filter(b => b.status === 'winning').map(b => b.listing_id));
+      const uniqueActiveListings = new Set(activeBidsData.map(b => b.listing_id));
+      const uniqueWinningListings = new Set(winningBidsData.map(b => b.listing_id));
       const activeBids = uniqueActiveListings.size;
       const winningBids = uniqueWinningListings.size;
       const unpaidInvoices = invoicesResult.data || [];

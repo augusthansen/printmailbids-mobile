@@ -29,11 +29,6 @@ import { API_URL, getBidIncrement, getMinNextBid } from '../../constants/config'
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'PlaceBid'>;
 
-function getMinimumBid(currentBid: number | null, startingPrice: number | null): number {
-  const base = currentBid || startingPrice || 0;
-  return getMinNextBid(base);
-}
-
 export default function PlaceBidScreen({ route, navigation }: Props) {
   const { listingId } = route.params;
   const insets = useSafeAreaInsets();
@@ -91,37 +86,50 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
     },
   });
 
-  // Calculate minimum bid
-  const minimumBid = listing ? getMinimumBid(listing.current_price, listing.starting_price) : 0;
-  const bidIncrement = listing ? getBidIncrement(listing.current_price || listing.starting_price || 0) : 0;
+  // Calculate minimum bid based on current price
+  const currentPriceBase = listing?.current_price || listing?.starting_price || 0;
+  const minimumBid = listing ? getMinNextBid(currentPriceBase) : 0;
+  const bidIncrement = listing ? getBidIncrement(currentPriceBase) : 0;
 
   // Check if user already has a bid
+  // Check if reserve is met (needed before determining winning status)
+  const reserveMet = !listing?.reserve_price ||
+    (listing?.current_price && listing.current_price >= listing.reserve_price);
+
   const userCurrentMaxBid = listing?.my_bid?.max_bid || 0;
   const userHasExistingBid = userCurrentMaxBid > 0;
-  const userIsWinning = listing?.my_bid?.status === 'winning';
+  // User is only truly "winning" if they have the high bid AND the reserve is met
+  // Before reserve is met, they're just the "high bidder" but not guaranteed to win
+  const userIsHighBidder = listing?.my_bid?.status === 'winning';
+  const userIsWinning = userIsHighBidder && reserveMet;
 
   // The actual minimum the user must bid:
-  // - If winning: must be higher than their current max bid
+  // - If winning (reserve met): must be higher than their current max bid
+  // - If high bidder but reserve not met: treat like regular bid (use minimumBid)
   // - If outbid or no bid: must be at least the minimum bid (current price + increment)
-  // - Always ensure it's at least minimumBid to handle stale bid status data
+  // - ALWAYS use minimumBid as the floor to handle stale bid status data
   const requiredMinimum = userIsWinning
     ? Math.max(userCurrentMaxBid + getBidIncrement(userCurrentMaxBid), minimumBid)
     : minimumBid;
 
   // DEBUG: Log values to verify calculation
   console.log('BID DEBUG:', {
-    currentPrice: listing?.current_price,
+    listingCurrentPrice: listing?.current_price,
+    listingStartingPrice: listing?.starting_price,
+    listingReservePrice: listing?.reserve_price,
+    currentPriceBase,
     minimumBid,
+    bidIncrement,
     userCurrentMaxBid,
+    userIsHighBidder,
     userIsWinning,
+    reserveMet,
     userHasExistingBid,
     requiredMinimum,
     myBidStatus: listing?.my_bid?.status,
+    myBidAmount: listing?.my_bid?.amount,
+    myBidMaxBid: listing?.my_bid?.max_bid,
   });
-
-  // Check if reserve is met
-  const reserveMet = !listing?.reserve_price ||
-    (listing.current_price && listing.current_price >= listing.reserve_price);
 
   // Don't pre-fill bid amount - let placeholder show the suggested amount
   // User can tap quick select buttons or type their own amount
@@ -565,10 +573,14 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
   };
 
   const handleQuickBid = (increment: number) => {
-    // Only increase from existing max bid if user is winning; otherwise use minimum
+    // Calculate base amount for quick bid increments
+    // When winning, start from user's current max bid, but ensure it's never below minimumBid
+    // This handles the case where the price has increased due to another bidder's proxy bid
     const baseAmount = (userHasExistingBid && userIsWinning) ? userCurrentMaxBid : minimumBid;
     const incrementAmount = getBidIncrement(baseAmount);
-    const newAmount = baseAmount + increment * incrementAmount;
+    // Ensure the resulting amount is never below minimumBid
+    const calculatedAmount = baseAmount + increment * incrementAmount;
+    const newAmount = Math.max(calculatedAmount, minimumBid);
     setMaxBidAmount(newAmount.toString());
   };
 
@@ -665,19 +677,21 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
           {listing.my_bid && (
             <View style={[
               styles.yourBidStatus,
-              listing.my_bid.status === 'winning' ? styles.winningStatus : styles.outbidStatus
+              userIsHighBidder ? styles.winningStatus : styles.outbidStatus
             ]}>
               <Feather
-                name={listing.my_bid.status === 'winning' ? 'check-circle' : 'alert-circle'}
+                name={userIsHighBidder ? 'check-circle' : 'alert-circle'}
                 size={16}
-                color={listing.my_bid.status === 'winning' ? colors.success : colors.error}
+                color={userIsHighBidder ? colors.success : colors.error}
               />
               <Text style={[
                 styles.yourBidStatusText,
-                { color: listing.my_bid.status === 'winning' ? colors.success : colors.error }
+                { color: userIsHighBidder ? colors.success : colors.error }
               ]}>
-                {listing.my_bid.status === 'winning'
-                  ? `You're winning at ${formatCurrency(listing.my_bid.amount)}`
+                {userIsHighBidder
+                  ? (userIsWinning
+                    ? `You're winning at ${formatCurrency(listing.my_bid.amount)}`
+                    : `You're the high bidder at ${formatCurrency(listing.my_bid.amount)}`)
                   : `You've been outbid (${formatCurrency(listing.my_bid.amount)})`
                 }
               </Text>
@@ -709,7 +723,7 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
               {!hasReserve && userIsWinning ? 'Must be higher than:' : 'Minimum:'}
             </Text>
             <Text style={[styles.minimumBidValue, { color: themeColors.accent }]}>
-              {formatCurrency(!hasReserve && userIsWinning ? userCurrentMaxBid : minimumBid)}
+              {formatCurrency(!hasReserve && userIsWinning ? Math.max(userCurrentMaxBid, currentPriceBase) : minimumBid)}
             </Text>
           </View>
 
@@ -746,14 +760,15 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
           <View style={styles.quickBidButtons}>
             {userHasExistingBid && userIsWinning ? (
               <>
-                {/* When user has existing bid, show increase options from their current max */}
+                {/* When user has existing bid and is winning, show increase options from their current max */}
+                {/* Use Math.max to ensure displayed amounts are never below minimumBid (handles stale data) */}
                 <TouchableOpacity
                   style={[styles.quickBidButton, { backgroundColor: themeColors.accentFaint, borderColor: themeColors.accent }]}
                   onPress={() => handleQuickBid(1)}
                 >
                   <Text style={[styles.quickBidText, { color: themeColors.accent }]}>+{formatCurrency(getBidIncrement(userCurrentMaxBid))}</Text>
                   <Text style={[styles.quickBidAmount, { color: themeColors.textPrimary }]}>
-                    {formatCurrency(userCurrentMaxBid + getBidIncrement(userCurrentMaxBid))}
+                    {formatCurrency(Math.max(userCurrentMaxBid + getBidIncrement(userCurrentMaxBid), minimumBid))}
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -762,7 +777,7 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
                 >
                   <Text style={[styles.quickBidText, { color: themeColors.accent }]}>+{formatCurrency(getBidIncrement(userCurrentMaxBid) * 5)}</Text>
                   <Text style={[styles.quickBidAmount, { color: themeColors.textPrimary }]}>
-                    {formatCurrency(userCurrentMaxBid + getBidIncrement(userCurrentMaxBid) * 5)}
+                    {formatCurrency(Math.max(userCurrentMaxBid + getBidIncrement(userCurrentMaxBid) * 5, minimumBid))}
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -771,7 +786,7 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
                 >
                   <Text style={[styles.quickBidText, { color: themeColors.accent }]}>+{formatCurrency(getBidIncrement(userCurrentMaxBid) * 10)}</Text>
                   <Text style={[styles.quickBidAmount, { color: themeColors.textPrimary }]}>
-                    {formatCurrency(userCurrentMaxBid + getBidIncrement(userCurrentMaxBid) * 10)}
+                    {formatCurrency(Math.max(userCurrentMaxBid + getBidIncrement(userCurrentMaxBid) * 10, minimumBid))}
                   </Text>
                 </TouchableOpacity>
               </>

@@ -1,12 +1,13 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
+import { NavigationContainer, DefaultTheme, DarkTheme, NavigationContainerRef } from '@react-navigation/native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StripeProvider } from '@stripe/stripe-react-native';
 
 import { AuthProvider } from './src/contexts/AuthContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
+import { NotificationProvider, setNavigationRef } from './src/contexts/NotificationContext';
 import RootNavigator from './src/navigation/RootNavigator';
 import { STRIPE_PUBLISHABLE_KEY } from './src/constants/config';
 
@@ -23,6 +24,7 @@ const queryClient = new QueryClient({
 // Inner component that can access theme context
 function AppContent() {
   const { isDark, colors } = useTheme();
+  const navigationRef = useRef<NavigationContainerRef<any>>(null);
 
   const navigationTheme = isDark
     ? {
@@ -49,8 +51,14 @@ function AppContent() {
       };
 
   return (
-    <NavigationContainer theme={navigationTheme}>
-      <RootNavigator />
+    <NavigationContainer
+      ref={navigationRef}
+      theme={navigationTheme}
+      onReady={() => setNavigationRef(navigationRef.current)}
+    >
+      <NotificationProvider>
+        <RootNavigator />
+      </NotificationProvider>
       <StatusBar style={isDark ? 'light' : 'dark'} />
     </NavigationContainer>
   );
