@@ -125,7 +125,7 @@ export default function MyListingsScreen() {
 
   const handleEditListing = useCallback((listing: ListingWithImages) => {
     lightTap();
-    navigation.navigate('EditListing' as never, { listingId: listing.id } as never);
+    navigation.navigate('CreateListing' as never, { listingId: listing.id } as never);
   }, [navigation]);
 
   const handleCancelListing = (listing: ListingWithImages) => {
@@ -338,7 +338,7 @@ export default function MyListingsScreen() {
       </View>
 
       {/* Filter Bar */}
-      <View style={styles.filterContainer}>
+      <View style={[styles.filterContainer, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
         <FlatList
           horizontal
           data={FILTERS}

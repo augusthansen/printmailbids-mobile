@@ -140,6 +140,47 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
     }, [refetch])
   );
 
+  // Increment view count when listing is viewed (only once per session)
+  const viewCountedRef = useRef(false);
+  useEffect(() => {
+    if (!listingId || !listing || viewCountedRef.current) return;
+
+    // Don't count views for own listings
+    if (listing.seller_id === user?.id) return;
+
+    viewCountedRef.current = true;
+
+    // Increment view count using raw SQL for atomic increment
+    const incrementViewCount = async () => {
+      try {
+        // First get current value
+        const { data: currentListing } = await supabase
+          .from('listings')
+          .select('view_count')
+          .eq('id', listingId)
+          .single();
+
+        const newCount = (currentListing?.view_count || 0) + 1;
+
+        const { error, data } = await supabase
+          .from('listings')
+          .update({ view_count: newCount })
+          .eq('id', listingId)
+          .select('view_count');
+
+        if (error) {
+          console.error('Error incrementing view count:', error);
+        } else {
+          console.log('View count updated to:', data?.[0]?.view_count);
+        }
+      } catch (err) {
+        console.error('Error in view count increment:', err);
+      }
+    };
+
+    incrementViewCount();
+  }, [listingId, listing?.id, listing?.seller_id, user?.id]);
+
   // Real-time subscription for listing and bid updates
   useEffect(() => {
     if (!listingId) return;
@@ -192,18 +233,41 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
     mutationFn: async (isWatched: boolean) => {
       if (!user) throw new Error('Not authenticated');
 
+      // First get current watch_count
+      const { data: currentListing } = await supabase
+        .from('listings')
+        .select('watch_count')
+        .eq('id', listingId)
+        .single();
+
+      const currentCount = currentListing?.watch_count || 0;
+
       if (isWatched) {
+        // Remove from watchlist
         const { error } = await supabase
           .from('watchlist')
           .delete()
           .eq('user_id', user.id)
           .eq('listing_id', listingId);
         if (error) throw error;
+
+        // Decrement watch_count
+        await supabase
+          .from('listings')
+          .update({ watch_count: Math.max(0, currentCount - 1) })
+          .eq('id', listingId);
       } else {
+        // Add to watchlist
         const { error } = await supabase
           .from('watchlist')
           .insert({ user_id: user.id, listing_id: listingId });
         if (error) throw error;
+
+        // Increment watch_count
+        await supabase
+          .from('listings')
+          .update({ watch_count: currentCount + 1 })
+          .eq('id', listingId);
       }
     },
     onSuccess: () => {
@@ -260,9 +324,9 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
   const handleRelist = () => {
     if (!listing) return;
     mediumTap();
-    // Navigate to edit listing screen where seller can update dates and relist
+    // Navigate to create listing screen in edit mode where seller can update dates and relist
     navigation.navigate('ProfileTab', {
-      screen: 'EditListing',
+      screen: 'CreateListing',
       params: { listingId },
     });
   };

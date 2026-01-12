@@ -127,6 +127,7 @@ interface ListingFormData {
   auctionDuration: string;
   scheduleType: 'immediate' | 'scheduled';
   scheduledStartDate: string;
+  scheduledEndTime: string; // HH:MM format for end time (e.g., "14:00" for 2 PM)
   paymentDueDays: string;
   acceptsCreditCard: boolean;
   acceptsAch: boolean;
@@ -137,8 +138,8 @@ interface ListingFormData {
 // Constants
 const LISTING_TYPES: { key: ListingType; label: string; description: string }[] = [
   { key: 'auction', label: 'Auction Only', description: 'Competitive bidding with 2-min soft close' },
-  { key: 'auction_with_offers', label: 'Auction + Offers', description: 'Bidding plus direct offers' },
-  { key: 'make_offer', label: 'Make An Offer', description: 'Accept offers from buyers' },
+  { key: 'make_offer', label: 'Make An Offer Only', description: 'Accept offers from buyers' },
+  { key: 'auction_with_offers', label: 'Auction + Make An Offer', description: 'Bidding plus direct offers' },
 ];
 
 const EQUIPMENT_STATUSES: { key: EquipmentStatus; label: string; description: string }[] = [
@@ -178,6 +179,45 @@ const AUCTION_DURATIONS = [
   { key: '7', label: '7 Days' },
   { key: '10', label: '10 Days' },
   { key: '14', label: '14 Days' },
+];
+
+// End time options (in 30-min increments from 6 AM to 11 PM)
+const END_TIME_OPTIONS = [
+  { key: '06:00', label: '6:00 AM' },
+  { key: '06:30', label: '6:30 AM' },
+  { key: '07:00', label: '7:00 AM' },
+  { key: '07:30', label: '7:30 AM' },
+  { key: '08:00', label: '8:00 AM' },
+  { key: '08:30', label: '8:30 AM' },
+  { key: '09:00', label: '9:00 AM' },
+  { key: '09:30', label: '9:30 AM' },
+  { key: '10:00', label: '10:00 AM' },
+  { key: '10:30', label: '10:30 AM' },
+  { key: '11:00', label: '11:00 AM' },
+  { key: '11:30', label: '11:30 AM' },
+  { key: '12:00', label: '12:00 PM' },
+  { key: '12:30', label: '12:30 PM' },
+  { key: '13:00', label: '1:00 PM' },
+  { key: '13:30', label: '1:30 PM' },
+  { key: '14:00', label: '2:00 PM' },
+  { key: '14:30', label: '2:30 PM' },
+  { key: '15:00', label: '3:00 PM' },
+  { key: '15:30', label: '3:30 PM' },
+  { key: '16:00', label: '4:00 PM' },
+  { key: '16:30', label: '4:30 PM' },
+  { key: '17:00', label: '5:00 PM' },
+  { key: '17:30', label: '5:30 PM' },
+  { key: '18:00', label: '6:00 PM' },
+  { key: '18:30', label: '6:30 PM' },
+  { key: '19:00', label: '7:00 PM' },
+  { key: '19:30', label: '7:30 PM' },
+  { key: '20:00', label: '8:00 PM' },
+  { key: '20:30', label: '8:30 PM' },
+  { key: '21:00', label: '9:00 PM' },
+  { key: '21:30', label: '9:30 PM' },
+  { key: '22:00', label: '10:00 PM' },
+  { key: '22:30', label: '10:30 PM' },
+  { key: '23:00', label: '11:00 PM' },
 ];
 
 const OPERATING_SYSTEMS = [
@@ -311,6 +351,7 @@ const initialFormData: ListingFormData = {
   auctionDuration: '7',
   scheduleType: 'immediate',
   scheduledStartDate: '',
+  scheduledEndTime: '17:00', // Default to 5 PM
   paymentDueDays: '7',
   acceptsCreditCard: true,
   acceptsAch: true,
@@ -318,9 +359,12 @@ const initialFormData: ListingFormData = {
   acceptsCheck: false,
 };
 
-export default function CreateListingScreen({ navigation }: Props) {
+export default function CreateListingScreen({ navigation, route }: Props) {
+  const listingId = route.params?.listingId;
+  const isEditMode = !!listingId;
+
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const { colors: themeColors, isDark } = useTheme();
   const queryClient = useQueryClient();
   const scrollViewRef = useRef<ScrollView>(null);
@@ -332,6 +376,8 @@ export default function CreateListingScreen({ navigation }: Props) {
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [showOsPicker, setShowOsPicker] = useState(false);
   const [showControllerPicker, setShowControllerPicker] = useState(false);
+  const [showEndTimePicker, setShowEndTimePicker] = useState(false);
+  const [isLoadingListing, setIsLoadingListing] = useState(isEditMode);
 
   // Fetch categories
   const { data: categories } = useQuery({
@@ -364,7 +410,7 @@ export default function CreateListingScreen({ navigation }: Props) {
   });
 
   // Fetch seller profile for default terms
-  const { data: profile } = useQuery({
+  const { data: sellerProfile } = useQuery({
     queryKey: ['profile', user?.id],
     queryFn: async () => {
       if (!user) return null;
@@ -379,16 +425,122 @@ export default function CreateListingScreen({ navigation }: Props) {
     enabled: !!user,
   });
 
-  // Pre-fill seller defaults
+  // Fetch existing listing when editing
+  const { data: existingListing } = useQuery({
+    queryKey: ['editListing', listingId],
+    queryFn: async () => {
+      if (!listingId) return null;
+      const { data, error } = await supabase
+        .from('listings')
+        .select(`
+          *,
+          images:listing_images(*)
+        `)
+        .eq('id', listingId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!listingId,
+  });
+
+  // Populate form with existing listing data
   useEffect(() => {
-    if (profile) {
+    if (existingListing && isEditMode) {
+      const listing = existingListing;
+      const existingImages: LocalImage[] = (listing.images || [])
+        .sort((a: { sort_order: number }, b: { sort_order: number }) => (a.sort_order || 0) - (b.sort_order || 0))
+        .map((img: { url: string }) => ({
+          uri: img.url,
+          width: 800,
+          height: 600,
+          uploadedUrl: img.url,
+        }));
+
+      setFormData({
+        images: existingImages,
+        videoUrl: listing.video_url || '',
+        title: listing.title || '',
+        categoryId: listing.primary_category_id || '',
+        description: listing.description || '',
+        make: listing.make || '',
+        model: listing.model || '',
+        year: listing.year?.toString() || '',
+        serialNumber: listing.serial_number || '',
+        sellerTerms: listing.seller_terms || '',
+        shippingInfo: listing.shipping_info || '',
+        softwareNa: listing.software_na || false,
+        softwareVersion: listing.software_version || '',
+        operatingSystem: listing.operating_system || '',
+        controllerType: listing.controller_type || '',
+        configurationNa: listing.configuration_na || false,
+        numberOfHeads: listing.number_of_heads?.toString() || '',
+        maxSpeed: listing.max_speed || '',
+        feederCount: listing.feeder_count?.toString() || '',
+        outputStackerCount: listing.output_stacker_count?.toString() || '',
+        capabilitiesNa: listing.capabilities_na || false,
+        capabilities: listing.capabilities || [],
+        materialNa: listing.dimensions_na || false,
+        materialTypes: listing.material_types || '',
+        maxMaterialWidth: listing.max_material_width || '',
+        maxMaterialLength: listing.max_material_length || '',
+        materialWeight: listing.material_weight || '',
+        powerRequirements: listing.power_requirements || '',
+        networkConnectivity: listing.network_connectivity || '',
+        lastServiceDate: listing.last_service_date || '',
+        includedAccessories: listing.included_accessories || '',
+        maintenanceHistory: listing.maintenance_history || '',
+        condition: listing.condition || '',
+        hoursCount: listing.hours_count?.toString() || '',
+        equipmentStatus: listing.equipment_status || '',
+        onsiteAssistance: listing.onsite_assistance || '',
+        weightLbs: listing.weight_lbs?.toString() || '',
+        floorLength: listing.floor_length_ft?.toString() || '',
+        floorWidth: listing.floor_width_ft?.toString() || '',
+        removalDeadline: listing.removal_deadline || '',
+        pickupNotes: listing.pickup_notes || '',
+        locationId: listing.location_id || '',
+        deinstallResponsibility: listing.deinstall_responsibility || 'buyer',
+        deinstallFee: listing.deinstall_fee?.toString() || '',
+        electricalRequirements: listing.electrical_requirements || '',
+        airRequirementsPsi: listing.air_requirements_psi?.toString() || '',
+        listingType: listing.listing_type || 'auction',
+        startingPrice: listing.starting_price?.toString() || '',
+        reservePrice: listing.reserve_price?.toString() || '',
+        buyNowPrice: listing.buy_now_price?.toString() || '',
+        acceptOffers: listing.accept_offers || false,
+        autoAcceptPrice: listing.auto_accept_price?.toString() || '',
+        autoDeclinePrice: listing.auto_decline_price?.toString() || '',
+        auctionDuration: '7',
+        scheduleType: 'immediate',
+        scheduledStartDate: '',
+        scheduledEndTime: listing.end_time ? new Date(listing.end_time).toTimeString().slice(0, 5) : '17:00',
+        paymentDueDays: listing.payment_due_days?.toString() || '7',
+        acceptsCreditCard: listing.accepts_credit_card ?? true,
+        acceptsAch: listing.accepts_ach ?? true,
+        acceptsWire: listing.accepts_wire ?? true,
+        acceptsCheck: listing.accepts_check ?? false,
+      });
+
+      // Restore the step the user was on when they saved the draft
+      if (listing.status === 'draft' && typeof listing.draft_step === 'number') {
+        setCurrentStep(listing.draft_step);
+      }
+
+      setIsLoadingListing(false);
+    }
+  }, [existingListing, isEditMode]);
+
+  // Pre-fill seller defaults (only for new listings)
+  useEffect(() => {
+    if (sellerProfile && !isEditMode) {
       setFormData(prev => ({
         ...prev,
-        sellerTerms: prev.sellerTerms || profile.seller_terms || '',
-        shippingInfo: prev.shippingInfo || profile.default_shipping_info || '',
+        sellerTerms: prev.sellerTerms || sellerProfile.seller_terms || '',
+        shippingInfo: prev.shippingInfo || sellerProfile.default_shipping_info || '',
       }));
     }
-  }, [profile]);
+  }, [sellerProfile, isEditMode]);
 
   // Set default address
   useEffect(() => {
@@ -413,7 +565,7 @@ export default function CreateListingScreen({ navigation }: Props) {
       mediaTypes: ['images'],
       allowsMultipleSelection: true,
       quality: 0.8,
-      selectionLimit: 10 - formData.images.length,
+      selectionLimit: 25 - formData.images.length,
     });
 
     if (!result.canceled && result.assets.length > 0) {
@@ -424,7 +576,7 @@ export default function CreateListingScreen({ navigation }: Props) {
       }));
       setFormData(prev => ({
         ...prev,
-        images: [...prev.images, ...newImages].slice(0, 10),
+        images: [...prev.images, ...newImages].slice(0, 25),
       }));
       lightTap();
     }
@@ -450,7 +602,7 @@ export default function CreateListingScreen({ navigation }: Props) {
       };
       setFormData(prev => ({
         ...prev,
-        images: [...prev.images, newImage].slice(0, 10),
+        images: [...prev.images, newImage].slice(0, 25),
       }));
       lightTap();
     }
@@ -575,11 +727,18 @@ export default function CreateListingScreen({ navigation }: Props) {
     }
   };
 
-  const uploadImages = async (listingId: string): Promise<string[]> => {
+  const uploadImages = async (listingId: string, imagesToUpload?: LocalImage[]): Promise<string[]> => {
     const uploadedUrls: string[] = [];
+    const images = imagesToUpload || formData.images;
 
-    for (let i = 0; i < formData.images.length; i++) {
-      const image = formData.images[i];
+    for (let i = 0; i < images.length; i++) {
+      const image = images[i];
+
+      // Skip already uploaded images
+      if (image.uploadedUrl) {
+        uploadedUrls.push(image.uploadedUrl);
+        continue;
+      }
 
       try {
         // Resize image for upload
@@ -593,14 +752,33 @@ export default function CreateListingScreen({ navigation }: Props) {
         const ext = 'jpg';
         const filename = `${listingId}/${Date.now()}-${i}.${ext}`;
 
-        // Read image as blob
+        // Read image as blob then convert to base64
+        // (Blob uploads create 0-byte files in React Native)
         const response = await fetch(manipulated.uri);
         const blob = await response.blob();
+
+        // Convert blob to base64
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64Data = (reader.result as string).split(',')[1];
+            resolve(base64Data);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+
+        // Decode base64 to Uint8Array
+        const binaryString = atob(base64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let j = 0; j < binaryString.length; j++) {
+          bytes[j] = binaryString.charCodeAt(j);
+        }
 
         // Upload to Supabase storage
         const { error: uploadError } = await supabase.storage
           .from('listing-images')
-          .upload(filename, blob, {
+          .upload(filename, bytes, {
             contentType: 'image/jpeg',
             upsert: false,
           });
@@ -634,42 +812,98 @@ export default function CreateListingScreen({ navigation }: Props) {
     mediumTap();
 
     try {
-      // Create listing with draft status
+      // Create or update listing with draft status
       const listingData = buildListingData('draft');
+      let finalListingId: string;
 
-      const { data: listing, error } = await supabase
-        .from('listings')
-        .insert(listingData)
-        .select()
-        .single();
+      if (isEditMode && listingId) {
+        // Update existing listing
+        const { error } = await supabase
+          .from('listings')
+          .update(listingData)
+          .eq('id', listingId);
 
-      if (error) throw error;
+        if (error) throw error;
+        finalListingId = listingId;
 
-      // Upload images if any
-      if (formData.images.length > 0) {
-        const uploadedUrls = await uploadImages(listing.id);
+        // Handle images for edit mode
+        // Get list of images that are already uploaded (have uploadedUrl)
+        const existingUrls = formData.images
+          .filter(img => img.uploadedUrl)
+          .map(img => img.uploadedUrl as string);
 
-        // Insert image records
-        for (let i = 0; i < uploadedUrls.length; i++) {
-          await supabase.from('listing_images').insert({
-            listing_id: listing.id,
-            url: uploadedUrls[i],
-            sort_order: i,
-            is_primary: i === 0,
-          });
+        // Delete images that were removed
+        await supabase
+          .from('listing_images')
+          .delete()
+          .eq('listing_id', listingId)
+          .not('url', 'in', `(${existingUrls.map(u => `"${u}"`).join(',')})`);
+
+        // Upload new images (those without uploadedUrl)
+        const newImages = formData.images.filter(img => !img.uploadedUrl);
+        if (newImages.length > 0) {
+          const newUploadedUrls = await uploadImages(listingId, newImages);
+          const currentMaxOrder = formData.images.filter(img => img.uploadedUrl).length;
+          for (let i = 0; i < newUploadedUrls.length; i++) {
+            await supabase.from('listing_images').insert({
+              listing_id: listingId,
+              url: newUploadedUrls[i],
+              sort_order: currentMaxOrder + i,
+              is_primary: currentMaxOrder === 0 && i === 0,
+            });
+          }
+        }
+
+        // Update sort order for all images
+        for (let i = 0; i < formData.images.length; i++) {
+          const img = formData.images[i];
+          if (img.uploadedUrl) {
+            await supabase
+              .from('listing_images')
+              .update({ sort_order: i, is_primary: i === 0 })
+              .eq('listing_id', listingId)
+              .eq('url', img.uploadedUrl);
+          }
+        }
+      } else {
+        // Create new listing
+        const { data: listing, error } = await supabase
+          .from('listings')
+          .insert(listingData)
+          .select()
+          .single();
+
+        if (error) throw error;
+        finalListingId = listing.id;
+
+        // Upload images if any
+        if (formData.images.length > 0) {
+          const uploadedUrls = await uploadImages(finalListingId);
+
+          // Insert image records
+          for (let i = 0; i < uploadedUrls.length; i++) {
+            await supabase.from('listing_images').insert({
+              listing_id: finalListingId,
+              url: uploadedUrls[i],
+              sort_order: i,
+              is_primary: i === 0,
+            });
+          }
         }
       }
 
       successFeedback();
       queryClient.invalidateQueries({ queryKey: ['myListings'] });
+      queryClient.invalidateQueries({ queryKey: ['editListing', listingId] });
 
       Alert.alert('Draft Saved', 'Your listing has been saved as a draft.', [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving draft:', error);
       errorFeedback();
-      Alert.alert('Error', 'Failed to save draft. Please try again.');
+      const errorMessage = error?.message || error?.details || 'Failed to save draft. Please try again.';
+      Alert.alert('Error', errorMessage);
     } finally {
       setIsSavingDraft(false);
     }
@@ -694,33 +928,105 @@ export default function CreateListingScreen({ navigation }: Props) {
     try {
       const status = formData.scheduleType === 'scheduled' ? 'scheduled' : 'active';
       const listingData = buildListingData(status);
+      let finalListingId: string;
 
-      const { data: listing, error } = await supabase
-        .from('listings')
-        .insert(listingData)
-        .select()
-        .single();
+      if (isEditMode && listingId) {
+        // Update existing listing
+        const { error } = await supabase
+          .from('listings')
+          .update(listingData)
+          .eq('id', listingId);
 
-      if (error) throw error;
+        if (error) throw error;
+        finalListingId = listingId;
 
-      // Upload images
-      if (formData.images.length > 0) {
-        const uploadedUrls = await uploadImages(listing.id);
+        // Handle images for edit mode
+        const existingUrls = formData.images
+          .filter(img => img.uploadedUrl)
+          .map(img => img.uploadedUrl as string);
 
-        // Insert image records
-        for (let i = 0; i < uploadedUrls.length; i++) {
-          await supabase.from('listing_images').insert({
-            listing_id: listing.id,
-            url: uploadedUrls[i],
-            sort_order: i,
-            is_primary: i === 0,
-          });
+        // Delete removed images
+        if (existingUrls.length > 0) {
+          await supabase
+            .from('listing_images')
+            .delete()
+            .eq('listing_id', listingId)
+            .not('url', 'in', `(${existingUrls.map(u => `"${u}"`).join(',')})`);
+        } else {
+          // Delete all old images if none kept
+          await supabase
+            .from('listing_images')
+            .delete()
+            .eq('listing_id', listingId);
+        }
+
+        // Upload new images
+        const newImages = formData.images.filter(img => !img.uploadedUrl);
+        if (newImages.length > 0) {
+          const newUploadedUrls = await uploadImages(listingId, newImages);
+          const currentMaxOrder = formData.images.filter(img => img.uploadedUrl).length;
+          for (let i = 0; i < newUploadedUrls.length; i++) {
+            await supabase.from('listing_images').insert({
+              listing_id: listingId,
+              url: newUploadedUrls[i],
+              sort_order: currentMaxOrder + i,
+              is_primary: currentMaxOrder === 0 && i === 0,
+            });
+          }
+        }
+
+        // Update sort order
+        for (let i = 0; i < formData.images.length; i++) {
+          const img = formData.images[i];
+          if (img.uploadedUrl) {
+            await supabase
+              .from('listing_images')
+              .update({ sort_order: i, is_primary: i === 0 })
+              .eq('listing_id', listingId)
+              .eq('url', img.uploadedUrl);
+          }
+        }
+      } else {
+        // Create new listing
+        const { data: listing, error } = await supabase
+          .from('listings')
+          .insert(listingData)
+          .select()
+          .single();
+
+        if (error) throw error;
+        finalListingId = listing.id;
+
+        // Auto-set is_seller = true when user creates their first listing
+        if (!profile?.is_seller) {
+          await supabase
+            .from('profiles')
+            .update({ is_seller: true, updated_at: new Date().toISOString() })
+            .eq('id', user!.id);
+          // Refresh profile to update local state
+          refreshProfile?.();
+        }
+
+        // Upload images
+        if (formData.images.length > 0) {
+          const uploadedUrls = await uploadImages(finalListingId);
+
+          // Insert image records
+          for (let i = 0; i < uploadedUrls.length; i++) {
+            await supabase.from('listing_images').insert({
+              listing_id: finalListingId,
+              url: uploadedUrls[i],
+              sort_order: i,
+              is_primary: i === 0,
+            });
+          }
         }
       }
 
       successFeedback();
       queryClient.invalidateQueries({ queryKey: ['myListings'] });
       queryClient.invalidateQueries({ queryKey: ['activeListings'] });
+      queryClient.invalidateQueries({ queryKey: ['editListing', listingId] });
 
       Alert.alert(
         'Listing Published!',
@@ -728,7 +1034,7 @@ export default function CreateListingScreen({ navigation }: Props) {
           ? 'Your listing has been scheduled and will go live at the specified time.'
           : 'Your listing is now live!',
         [{ text: 'View Listing', onPress: () => {
-          navigation.replace('ListingDetail', { listingId: listing.id });
+          navigation.replace('ListingDetail', { listingId: finalListingId });
         }}]
       );
     } catch (error) {
@@ -755,6 +1061,12 @@ export default function CreateListingScreen({ navigation }: Props) {
     endTime = new Date(startTime);
     endTime.setDate(endTime.getDate() + durationDays);
 
+    // Apply selected end time (hour and minute) to the end date
+    if (formData.scheduledEndTime) {
+      const [hours, minutes] = formData.scheduledEndTime.split(':').map(Number);
+      endTime.setHours(hours, minutes, 0, 0);
+    }
+
     return {
       seller_id: user!.id,
       title: formData.title.trim(),
@@ -770,13 +1082,10 @@ export default function CreateListingScreen({ navigation }: Props) {
       fixed_price: formData.listingType === 'make_offer' && formData.buyNowPrice
         ? parseFloat(formData.buyNowPrice) : null,
       accept_offers: formData.acceptOffers || formData.listingType === 'auction_with_offers' || formData.listingType === 'make_offer',
-      auto_accept_price: formData.autoAcceptPrice ? parseFloat(formData.autoAcceptPrice) : null,
-      auto_decline_price: formData.autoDeclinePrice ? parseFloat(formData.autoDeclinePrice) : null,
 
       // Timing
       start_time: status !== 'draft' ? startTime.toISOString() : null,
       end_time: status !== 'draft' && hasAuction ? endTime.toISOString() : null,
-      original_end_time: status !== 'draft' && hasAuction ? endTime.toISOString() : null,
 
       // Equipment Details
       make: formData.make.trim() || null,
@@ -785,45 +1094,43 @@ export default function CreateListingScreen({ navigation }: Props) {
       serial_number: formData.serialNumber.trim() || null,
       condition: formData.condition || null,
       hours_count: formData.hoursCount ? parseInt(formData.hoursCount) : null,
-      equipment_status: formData.equipmentStatus || null,
 
-      // Specs
-      software_version: formData.softwareNa ? null : (formData.softwareVersion.trim() || null),
-      operating_system: formData.softwareNa ? null : (formData.operatingSystem || null),
-      controller_type: formData.softwareNa ? null : (formData.controllerType || null),
-      number_of_heads: formData.configurationNa ? null : (formData.numberOfHeads ? parseInt(formData.numberOfHeads) : null),
-      max_speed: formData.configurationNa ? null : (formData.maxSpeed.trim() || null),
-      feeder_count: formData.configurationNa ? null : (formData.feederCount ? parseInt(formData.feederCount) : null),
-      output_stacker_count: formData.configurationNa ? null : (formData.outputStackerCount ? parseInt(formData.outputStackerCount) : null),
-      capabilities: formData.capabilitiesNa ? null : (formData.capabilities.length > 0 ? formData.capabilities : null),
-      material_types: formData.materialNa ? null : (formData.materialTypes.trim() || null),
-      max_material_width: formData.materialNa ? null : (formData.maxMaterialWidth.trim() || null),
-      max_material_length: formData.materialNa ? null : (formData.maxMaterialLength.trim() || null),
-      material_weight: formData.materialNa ? null : (formData.materialWeight.trim() || null),
+      // Machine Specs (Step 3)
+      software_na: formData.softwareNa,
+      software_version: formData.softwareVersion.trim() || null,
+      operating_system: formData.operatingSystem || null,
+      controller_type: formData.controllerType || null,
+      configuration_na: formData.configurationNa,
+      number_of_heads: formData.numberOfHeads ? parseInt(formData.numberOfHeads) : null,
+      max_speed: formData.maxSpeed.trim() || null,
+      feeder_count: formData.feederCount ? parseInt(formData.feederCount) : null,
+      output_stacker_count: formData.outputStackerCount ? parseInt(formData.outputStackerCount) : null,
+      capabilities_na: formData.capabilitiesNa,
+      capabilities: formData.capabilities.length > 0 ? formData.capabilities : null,
+      dimensions_na: formData.materialNa,
+      material_types: formData.materialTypes.trim() || null,
+      max_material_width: formData.maxMaterialWidth.trim() || null,
+      max_material_length: formData.maxMaterialLength.trim() || null,
+      material_weight: formData.materialWeight.trim() || null,
       power_requirements: formData.powerRequirements.trim() || null,
       network_connectivity: formData.networkConnectivity.trim() || null,
       last_service_date: formData.lastServiceDate || null,
       included_accessories: formData.includedAccessories.trim() || null,
       maintenance_history: formData.maintenanceHistory.trim() || null,
 
-      // N/A flags
-      software_na: formData.softwareNa,
-      configuration_na: formData.configurationNa,
-      capabilities_na: formData.capabilitiesNa,
-      dimensions_na: formData.materialNa,
-
-      // Logistics
+      // Condition & Logistics (Step 4)
+      equipment_status: formData.equipmentStatus || null,
       onsite_assistance: formData.onsiteAssistance || null,
-      weight_lbs: formData.weightLbs ? parseInt(formData.weightLbs) : null,
+      weight_lbs: formData.weightLbs ? parseFloat(formData.weightLbs) : null,
       floor_length_ft: formData.floorLength ? parseFloat(formData.floorLength) : null,
       floor_width_ft: formData.floorWidth ? parseFloat(formData.floorWidth) : null,
-      electrical_requirements: formData.electricalRequirements.trim() || null,
-      air_requirements_psi: formData.airRequirementsPsi ? parseFloat(formData.airRequirementsPsi) : null,
       removal_deadline: formData.removalDeadline || null,
       pickup_notes: formData.pickupNotes.trim() || null,
       location_id: formData.locationId || null,
-      deinstall_responsibility: formData.deinstallResponsibility,
+      deinstall_responsibility: formData.deinstallResponsibility || null,
       deinstall_fee: formData.deinstallFee ? parseFloat(formData.deinstallFee) : null,
+      electrical_requirements: formData.electricalRequirements.trim() || null,
+      air_requirements_psi: formData.airRequirementsPsi ? parseFloat(formData.airRequirementsPsi) : null,
 
       // Terms & Shipping
       seller_terms: formData.sellerTerms.trim() || null,
@@ -837,10 +1144,8 @@ export default function CreateListingScreen({ navigation }: Props) {
       accepts_wire: formData.acceptsWire,
       accepts_check: formData.acceptsCheck,
 
-      // Initialize counters
-      bid_count: 0,
-      view_count: 0,
-      watch_count: 0,
+      // Draft tracking
+      draft_step: status === 'draft' ? currentStep : null,
     };
   };
 
@@ -866,12 +1171,14 @@ export default function CreateListingScreen({ navigation }: Props) {
                 isActive && styles.stepItemActive,
               ]}
               onPress={() => {
-                if (index < currentStep) {
+                if (index !== currentStep) {
                   setCurrentStep(index);
                   scrollViewRef.current?.scrollTo({ y: 0, animated: true });
                   lightTap();
                 }
               }}
+              accessibilityLabel={`Go to step ${index + 1}: ${step.title}`}
+              accessibilityRole="button"
             >
               <View style={[
                 styles.stepCircle,
@@ -881,9 +1188,9 @@ export default function CreateListingScreen({ navigation }: Props) {
                 },
               ]}>
                 {isCompleted ? (
-                  <Feather name="check" size={14} color="#ffffff" />
+                  <Feather name="check" size={18} color="#ffffff" />
                 ) : hasError ? (
-                  <Feather name="alert-circle" size={14} color={colors.error} />
+                  <Feather name="alert-circle" size={18} color={colors.error} />
                 ) : (
                   <Text style={[
                     styles.stepNumber,
@@ -909,9 +1216,18 @@ export default function CreateListingScreen({ navigation }: Props) {
   // Step 1: Photos & Videos
   const renderPhotosStep = () => (
     <View style={styles.stepContent}>
-      <Text style={[styles.stepTitle, { color: themeColors.textPrimary }]}>Photos & Videos</Text>
+      <View style={styles.stepTitleRow}>
+        <Text style={[styles.stepTitle, { color: themeColors.textPrimary }]}>Photos & Videos</Text>
+        {formData.images.length > 0 && (
+          <View style={[styles.photoCountBadge, { backgroundColor: themeColors.accentFaint }]}>
+            <Text style={[styles.photoCountText, { color: themeColors.accent }]}>
+              {formData.images.length} of 25
+            </Text>
+          </View>
+        )}
+      </View>
       <Text style={[styles.stepDescription, { color: themeColors.textMuted }]}>
-        Add up to 10 photos of your equipment. The first image will be the primary photo.
+        Add up to 25 photos of your equipment. The first image will be the primary photo. Portrait orientation is recommended for better mobile viewing.
       </Text>
 
       <View style={styles.imagesGrid}>
@@ -926,49 +1242,55 @@ export default function CreateListingScreen({ navigation }: Props) {
             <View style={styles.imageActions}>
               {index > 0 && (
                 <TouchableOpacity
-                  style={[styles.imageActionBtn, { backgroundColor: themeColors.sand }]}
+                  style={[styles.imageActionBtn, { backgroundColor: 'rgba(255,255,255,0.95)' }]}
                   onPress={() => handleMoveImage(index, index - 1)}
                 >
-                  <Feather name="arrow-left" size={14} color={themeColors.textPrimary} />
+                  <Feather name="arrow-left" size={16} color="#1e293b" />
                 </TouchableOpacity>
               )}
               {index < formData.images.length - 1 && (
                 <TouchableOpacity
-                  style={[styles.imageActionBtn, { backgroundColor: themeColors.sand }]}
+                  style={[styles.imageActionBtn, { backgroundColor: 'rgba(255,255,255,0.95)' }]}
                   onPress={() => handleMoveImage(index, index + 1)}
                 >
-                  <Feather name="arrow-right" size={14} color={themeColors.textPrimary} />
+                  <Feather name="arrow-right" size={16} color="#1e293b" />
                 </TouchableOpacity>
               )}
               <TouchableOpacity
                 style={[styles.imageActionBtn, { backgroundColor: colors.error }]}
                 onPress={() => handleRemoveImage(index)}
               >
-                <Feather name="trash-2" size={14} color="#ffffff" />
+                <Feather name="trash-2" size={16} color="#ffffff" />
               </TouchableOpacity>
             </View>
           </View>
         ))}
-
-        {formData.images.length < 10 && (
-          <View style={styles.addImageButtons}>
-            <TouchableOpacity
-              style={[styles.addImageButton, { backgroundColor: isDark ? themeColors.sand : '#ffffff', borderColor: themeColors.border }]}
-              onPress={handlePickImages}
-            >
-              <Feather name="image" size={28} color={themeColors.textLight} />
-              <Text style={[styles.addImageText, { color: themeColors.textMuted }]}>Gallery</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.addImageButton, { backgroundColor: isDark ? themeColors.sand : '#ffffff', borderColor: themeColors.border }]}
-              onPress={handleTakePhoto}
-            >
-              <Feather name="camera" size={28} color={themeColors.textLight} />
-              <Text style={[styles.addImageText, { color: themeColors.textMuted }]}>Camera</Text>
-            </TouchableOpacity>
-          </View>
-        )}
       </View>
+
+      {formData.images.length < 25 && (
+        <View style={styles.addImageButtons}>
+          <TouchableOpacity
+            style={[styles.addImageButton, { backgroundColor: isDark ? themeColors.sand : themeColors.background, borderColor: themeColors.border }]}
+            onPress={handlePickImages}
+          >
+            <View style={[styles.addImageIconCircle, { backgroundColor: themeColors.accentFaint }]}>
+              <Feather name="image" size={28} color={themeColors.accent} />
+            </View>
+            <Text style={[styles.addImageText, { color: themeColors.textPrimary }]}>Gallery</Text>
+            <Text style={[styles.addImageHint, { color: themeColors.textMuted }]}>Choose existing photos</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.addImageButton, { backgroundColor: isDark ? themeColors.sand : themeColors.background, borderColor: themeColors.border }]}
+            onPress={handleTakePhoto}
+          >
+            <View style={[styles.addImageIconCircle, { backgroundColor: themeColors.accentFaint }]}>
+              <Feather name="camera" size={28} color={themeColors.accent} />
+            </View>
+            <Text style={[styles.addImageText, { color: themeColors.textPrimary }]}>Camera</Text>
+            <Text style={[styles.addImageHint, { color: themeColors.textMuted }]}>Take a new photo</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={styles.inputGroup}>
         <Text style={[styles.label, { color: themeColors.textPrimary }]}>Video URL (Optional)</Text>
@@ -1913,6 +2235,33 @@ export default function CreateListingScreen({ navigation }: Props) {
                 </TouchableOpacity>
               </View>
             </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: themeColors.textPrimary }]}>Auction End Time</Text>
+              <Text style={[styles.hint, { color: themeColors.textMuted }]}>
+                Choose what time of day the auction should end (in your local timezone)
+              </Text>
+              <TouchableOpacity
+                style={[
+                  styles.input,
+                  styles.pickerButton,
+                  { backgroundColor: isDark ? themeColors.sand : '#ffffff', borderColor: themeColors.border }
+                ]}
+                onPress={() => {
+                  lightTap();
+                  setShowEndTimePicker(true);
+                }}
+              >
+                <Feather name="clock" size={18} color={themeColors.textMuted} />
+                <Text style={[styles.pickerButtonText, { color: themeColors.textPrimary }]}>
+                  {END_TIME_OPTIONS.find(t => t.key === formData.scheduledEndTime)?.label || '5:00 PM'}
+                </Text>
+                <Feather name="chevron-down" size={18} color={themeColors.textMuted} />
+              </TouchableOpacity>
+              <Text style={[styles.hint, { color: themeColors.textMuted, marginTop: spacing.xs }]}>
+                Tip: Peak bidding hours are typically 5-8 PM local time
+              </Text>
+            </View>
           </>
         )}
 
@@ -2256,6 +2605,47 @@ export default function CreateListingScreen({ navigation }: Props) {
     </Modal>
   );
 
+  // Render end time picker modal
+  const renderEndTimePicker = () => (
+    <Modal
+      visible={showEndTimePicker}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={() => setShowEndTimePicker(false)}
+    >
+      <View style={[styles.modalContainer, { backgroundColor: themeColors.background }]}>
+        <View style={[styles.modalHeader, { borderBottomColor: themeColors.borderLight }]}>
+          <Text style={[styles.modalTitle, { color: themeColors.textPrimary }]}>Auction End Time</Text>
+          <TouchableOpacity onPress={() => setShowEndTimePicker(false)}>
+            <Feather name="x" size={24} color={themeColors.textPrimary} />
+          </TouchableOpacity>
+        </View>
+        <ScrollView style={styles.modalContent}>
+          {END_TIME_OPTIONS.map((time) => (
+            <TouchableOpacity
+              key={time.key}
+              style={[
+                styles.modalOption,
+                { borderBottomColor: themeColors.borderLight },
+                formData.scheduledEndTime === time.key && { backgroundColor: themeColors.accentFaint },
+              ]}
+              onPress={() => {
+                updateField('scheduledEndTime', time.key);
+                setShowEndTimePicker(false);
+                lightTap();
+              }}
+            >
+              <Text style={[styles.modalOptionText, { color: themeColors.textPrimary }]}>{time.label}</Text>
+              {formData.scheduledEndTime === time.key && (
+                <Feather name="check" size={20} color={themeColors.accent} />
+              )}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+
   // Render current step content
   const renderStepContent = () => {
     switch (currentStep) {
@@ -2269,13 +2659,23 @@ export default function CreateListingScreen({ navigation }: Props) {
     }
   };
 
+  // Show loading spinner when loading existing listing
+  if (isLoadingListing) {
+    return (
+      <View style={[styles.container, styles.loadingContainer, { backgroundColor: themeColors.background }]}>
+        <ActivityIndicator size="large" color={themeColors.accent} />
+        <Text style={[styles.loadingText, { color: themeColors.textSecondary }]}>Loading listing...</Text>
+      </View>
+    );
+  }
+
   return (
     <KeyboardAvoidingView
-      style={[styles.container, { backgroundColor: themeColors.background }]}
+      style={[styles.container, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: isDark ? themeColors.sand : '#ffffff', paddingTop: insets.top }]}>
+      <View style={[styles.header, { backgroundColor: isDark ? themeColors.sand : '#ffffff', marginTop: insets.top }]}>
         <TouchableOpacity
           style={styles.headerButton}
           onPress={() => {
@@ -2296,7 +2696,7 @@ export default function CreateListingScreen({ navigation }: Props) {
         >
           <Feather name="x" size={24} color={themeColors.textPrimary} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: themeColors.textPrimary }]}>Create Listing</Text>
+        <Text style={[styles.headerTitle, { color: themeColors.textPrimary }]}>{isEditMode ? 'Edit Listing' : 'Create Listing'}</Text>
         <TouchableOpacity
           style={styles.headerButton}
           onPress={handleSaveDraft}
@@ -2316,7 +2716,7 @@ export default function CreateListingScreen({ navigation }: Props) {
       {/* Form Content */}
       <ScrollView
         ref={scrollViewRef}
-        style={styles.scrollView}
+        style={[styles.scrollView, { backgroundColor: themeColors.background }]}
         contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
@@ -2368,6 +2768,7 @@ export default function CreateListingScreen({ navigation }: Props) {
       {renderCategoryPicker()}
       {renderOsPicker()}
       {renderControllerPicker()}
+      {renderEndTimePicker()}
     </KeyboardAvoidingView>
   );
 }
@@ -2376,14 +2777,21 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  loadingContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: spacing.md,
+    fontSize: fontSize.base,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
     paddingBottom: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: 'transparent',
   },
   headerButton: {
     padding: spacing.sm,
@@ -2402,29 +2810,30 @@ const styles = StyleSheet.create({
   },
   stepIndicatorContent: {
     flexDirection: 'row',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    gap: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    gap: spacing.xl,
   },
   stepItem: {
     alignItems: 'center',
-    gap: spacing.xs,
+    gap: spacing.sm,
+    minWidth: 50,
   },
   stepItemActive: {},
   stepCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 2,
     justifyContent: 'center',
     alignItems: 'center',
   },
   stepNumber: {
-    fontSize: fontSize.sm,
+    fontSize: fontSize.base,
     fontWeight: fontWeight.semibold,
   },
   stepLabel: {
-    fontSize: fontSize.xs,
+    fontSize: fontSize.sm,
     fontWeight: fontWeight.medium,
   },
   scrollView: {
@@ -2433,10 +2842,24 @@ const styles = StyleSheet.create({
   stepContent: {
     padding: spacing.lg,
   },
-  stepTitle: {
-    fontSize: fontSize.xl,
-    fontWeight: fontWeight.bold,
+  stepTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: spacing.xs,
+  },
+  stepTitle: {
+    fontSize: fontSize['2xl'],
+    fontWeight: fontWeight.bold,
+  },
+  photoCountBadge: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.full,
+  },
+  photoCountText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
   },
   stepDescription: {
     fontSize: fontSize.base,
@@ -2628,60 +3051,74 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.md,
-    marginBottom: spacing.xl,
+    marginBottom: spacing.lg,
   },
   imageItem: {
-    width: (SCREEN_WIDTH - spacing.lg * 2 - spacing.md * 2) / 3,
-    aspectRatio: 1,
-    borderRadius: borderRadius.lg,
+    width: (SCREEN_WIDTH - spacing.lg * 2 - spacing.md) / 2,
+    borderRadius: borderRadius.xl,
     overflow: 'hidden',
     position: 'relative',
   },
   imageThumbnail: {
     width: '100%',
-    height: '100%',
+    aspectRatio: 4 / 3,
   },
   primaryBadge: {
     position: 'absolute',
-    top: spacing.xs,
-    left: spacing.xs,
+    top: spacing.sm,
+    left: spacing.sm,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
+    paddingVertical: spacing.xs,
     borderRadius: borderRadius.sm,
   },
   primaryBadgeText: {
     color: '#ffffff',
     fontSize: fontSize.xs,
-    fontWeight: fontWeight.medium,
+    fontWeight: fontWeight.semibold,
   },
   imageActions: {
     position: 'absolute',
-    bottom: spacing.xs,
-    right: spacing.xs,
+    bottom: spacing.sm,
+    right: spacing.sm,
     flexDirection: 'row',
-    gap: 4,
+    gap: spacing.xs,
   },
   imageActionBtn: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
+    ...shadows.sm,
   },
   addImageButtons: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.md,
   },
   addImageButton: {
-    width: (SCREEN_WIDTH - spacing.lg * 2 - spacing.md * 2) / 3,
-    aspectRatio: 1,
-    borderRadius: borderRadius.lg,
-    borderWidth: 2,
+    width: (SCREEN_WIDTH - spacing.lg * 2 - spacing.md) / 2,
+    aspectRatio: 4 / 3,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1.5,
     borderStyle: 'dashed',
     justifyContent: 'center',
     alignItems: 'center',
+    paddingVertical: spacing.lg,
+  },
+  addImageIconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.md,
   },
   addImageText: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.semibold,
+  },
+  addImageHint: {
     fontSize: fontSize.xs,
     marginTop: spacing.xs,
   },

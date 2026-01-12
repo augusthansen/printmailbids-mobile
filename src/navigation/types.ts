@@ -48,7 +48,7 @@ export type DashboardStackParamList = {
   PlaceBid: { listingId: string };
   MakeOffer: { listingId: string; parentOfferId?: string; suggestedAmount?: number };
   Checkout: { invoiceId: string };
-  CreateListing: undefined;
+  CreateListing: { listingId?: string } | undefined;
   EditListing: { listingId: string };
 };
 
@@ -75,7 +75,7 @@ export type ProfileStackParamList = {
   MyListings: undefined;
   MySales: undefined;
   SellerOffers: { viewMode?: 'sent' | 'received' } | undefined;
-  CreateListing: undefined;
+  CreateListing: { listingId?: string } | undefined;
   EditListing: { listingId: string };
   ListingDetail: { listingId: string };
   Settings: undefined;

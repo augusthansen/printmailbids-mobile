@@ -581,41 +581,52 @@ export default function DashboardScreen() {
             )}
           </View>
           <View style={[styles.notificationsCard, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}>
-            {recentNotifications.map((notification, index) => {
-              const config = getNotificationConfig(notification.type, themeColors);
-              return (
-                <React.Fragment key={notification.id}>
-                  <TouchableOpacity
-                    style={[
-                      styles.notificationItem,
-                      !notification.is_read && [styles.notificationItemUnread, { backgroundColor: themeColors.accentFaint }],
-                    ]}
-                    onPress={() => handleNotificationPress(notification)}
-                  >
-                    <View style={[styles.notificationIcon, { backgroundColor: config.iconBg }]}>
-                      <Feather name={config.icon} size={16} color={config.iconColor} />
-                    </View>
-                    <View style={styles.notificationContent}>
-                      <Text
+            {unreadNotifications.length > 0 ? (
+              <>
+                {unreadNotifications.slice(0, 3).map((notification, index) => {
+                  const config = getNotificationConfig(notification.type, themeColors);
+                  return (
+                    <React.Fragment key={notification.id}>
+                      <TouchableOpacity
                         style={[
-                          styles.notificationTitle,
-                          { color: themeColors.textPrimary },
-                          !notification.is_read && styles.notificationTitleUnread,
+                          styles.notificationItem,
+                          [styles.notificationItemUnread, { backgroundColor: themeColors.accentFaint }],
                         ]}
-                        numberOfLines={1}
+                        onPress={() => handleNotificationPress(notification)}
                       >
-                        {notification.title}
-                      </Text>
-                      <Text style={[styles.notificationTime, { color: themeColors.textMuted }]}>
-                        {formatRelativeTime(notification.created_at)}
-                      </Text>
-                    </View>
-                    {!notification.is_read && <View style={[styles.unreadDot, { backgroundColor: themeColors.accent }]} />}
-                  </TouchableOpacity>
-                  {index < recentNotifications.length - 1 && <View style={[styles.divider, { backgroundColor: themeColors.borderLight }]} />}
-                </React.Fragment>
-              );
-            })}
+                        <View style={[styles.notificationIcon, { backgroundColor: config.iconBg }]}>
+                          <Feather name={config.icon} size={16} color={config.iconColor} />
+                        </View>
+                        <View style={styles.notificationContent}>
+                          <Text
+                            style={[
+                              styles.notificationTitle,
+                              { color: themeColors.textPrimary },
+                              styles.notificationTitleUnread,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {notification.title}
+                          </Text>
+                          <Text style={[styles.notificationTime, { color: themeColors.textMuted }]}>
+                            {formatRelativeTime(notification.created_at)}
+                          </Text>
+                        </View>
+                        <View style={[styles.unreadDot, { backgroundColor: themeColors.accent }]} />
+                      </TouchableOpacity>
+                      {index < Math.min(unreadNotifications.length, 3) - 1 && <View style={[styles.divider, { backgroundColor: themeColors.borderLight }]} />}
+                    </React.Fragment>
+                  );
+                })}
+              </>
+            ) : (
+              <View style={styles.noNotificationsContainer}>
+                <Feather name="bell-off" size={24} color={themeColors.textLight} />
+                <Text style={[styles.noNotificationsText, { color: themeColors.textMuted }]}>
+                  No New Notifications
+                </Text>
+              </View>
+            )}
             <TouchableOpacity
               style={[styles.viewAllButton, { borderTopColor: themeColors.borderLight }]}
               onPress={() => navigation.navigate('ProfileTab', { screen: 'Notifications' })}
@@ -867,6 +878,13 @@ export default function DashboardScreen() {
                 title="Sales"
                 subtitle="View your sales history"
                 onPress={() => navigateTo('MySales')}
+              />
+              <View style={[styles.divider, { borderBottomColor: themeColors.borderLight }]} />
+              <ActionCard
+                icon="bar-chart-2"
+                title="Seller Analytics"
+                subtitle="Views, watchers, and performance"
+                onPress={() => navigation.navigate('ProfileTab', { screen: 'SellerDashboard' })}
               />
             </View>
           </View>
@@ -1147,6 +1165,18 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.xl,
     overflow: 'hidden',
     ...shadows.sm,
+  },
+  noNotificationsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.lg,
+  },
+  noNotificationsText: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.medium,
   },
   notificationItem: {
     flexDirection: 'row',

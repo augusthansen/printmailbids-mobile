@@ -4,7 +4,7 @@
 React Native mobile app for PrintMailBids - a B2B marketplace for buying and selling commercial print and mail equipment through auctions and offers.
 
 ## Tech Stack
-- **Framework**: React Native with Expo (SDK 52)
+- **Framework**: React Native with Expo (SDK 54)
 - **Language**: TypeScript
 - **Navigation**: React Navigation (stack + bottom tabs)
 - **State Management**: TanStack Query (React Query) for server state
@@ -126,11 +126,32 @@ Located in `src/constants/config.ts`:
 ## Onboarding Flow
 
 ### Overview
-New users go through a 4-step onboarding flow before accessing the main app:
+New users go through a multi-step onboarding flow before accessing the main app:
+
+**Buyer Flow (5 steps):**
 1. **Welcome** - Introduction screen
 2. **Profile** - Full name (required), company name (optional), avatar upload
-3. **Phone Verification** - SMS code verification via Twilio
-4. **Completion** - Summary with "Start Browsing" button
+3. **Account Type** - Choose buyer, seller, or both
+4. **Phone Verification** - SMS code verification via Twilio (with animated success checkmark)
+5. **Push Notifications** - Request permission with benefit cards
+6. **Completion** - Summary with "Start Browsing" button
+
+**Seller Flow (8 steps):** Same as buyer, plus:
+6. **Seller Terms** - Default terms & conditions for listings
+7. **Seller Shipping** - Default shipping/pickup information
+8. **Seller Wire Transfer** - Bank details for wire payments
+9. **Completion** - Summary with "Start Browsing" button
+
+### Seller Step "Add Later" Info Cards
+Each seller step shows an info card reminding users they can add this info later:
+```typescript
+<View style={[styles.laterInfoCard, { backgroundColor: themeColors.accentFaint }]}>
+  <Feather name="info" size={16} color={themeColors.accent} />
+  <Text style={[styles.laterInfoText, { color: themeColors.accent }]}>
+    You can update these anytime in Seller Settings
+  </Text>
+</View>
+```
 
 ### Key Files
 - `src/screens/onboarding/OnboardingScreen.tsx` - Main onboarding UI
@@ -179,6 +200,44 @@ fetch(`${WEB_APP_URL}/api/verification/verify-code`, {
 - `phone_verified` (boolean)
 - `phone_verified_at` (timestamp)
 - `verified_phone` (text)
+- `is_seller` (boolean) - Set during account type selection
+- `notify_push` (boolean) - User's push notification preference
+
+### Phone Verification Success Animation
+When phone verification succeeds, an animated checkmark is displayed:
+```typescript
+// Animation refs
+const checkmarkScale = useRef(new Animated.Value(0)).current;
+const checkmarkOpacity = useRef(new Animated.Value(0)).current;
+
+// Trigger animation on success
+useEffect(() => {
+  if (showPhoneSuccess) {
+    Animated.parallel([
+      Animated.spring(checkmarkScale, {
+        toValue: 1,
+        tension: 50,
+        friction: 7,
+        useNativeDriver: true,
+      }),
+      Animated.timing(checkmarkOpacity, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }
+}, [showPhoneSuccess]);
+```
+
+### Push Notifications Step
+The notifications step shows 4 benefit cards explaining why to enable push:
+1. **Outbid Alerts** - Know instantly when someone outbids you
+2. **New Offers** - Get notified of offers on your listings
+3. **Auction Ending** - Reminders before auctions you're watching end
+4. **Messages** - Never miss a message from buyers or sellers
+
+If permission was previously denied, tapping "Enable Notifications" opens Settings.
 
 ### Testing Onboarding
 To re-trigger onboarding for a user, run in Supabase SQL editor:
@@ -512,6 +571,44 @@ if (!result.canceled && result.assets.length > 0) {
 }
 ```
 
+## Seller Auto-Detection
+
+### The `is_seller` Flag
+The dashboard's "Selling Activity" section only appears when `profile.is_seller` is `true`. This flag is set:
+1. During onboarding when user selects "Seller" or "Both" account type
+2. Automatically when creating a first listing (CreateListingScreen.tsx)
+
+### Auto-Set `is_seller` on Listing Creation
+When a user creates their first listing, we automatically update their profile:
+```typescript
+// src/screens/seller/CreateListingScreen.tsx
+// After successful listing creation:
+if (!profile?.is_seller) {
+  await supabase
+    .from('profiles')
+    .update({ is_seller: true, updated_at: new Date().toISOString() })
+    .eq('id', user!.id);
+  refreshProfile?.();
+}
+```
+
+### Fixing Missing Seller Status
+If a user has listings but can't see seller stats on dashboard:
+```sql
+-- Set user as seller
+UPDATE profiles
+SET is_seller = true, updated_at = NOW()
+WHERE email = 'user@example.com';
+```
+
+### Dashboard Visibility Requirements
+| Section | Requirement |
+|---------|-------------|
+| Buying Activity | Always visible (all users can browse/buy) |
+| Selling Activity | Only when `profile.is_seller = true` OR `profile.is_admin = true` |
+| Pending Offers (seller) | Only in Selling Activity section |
+| Active Listings | Only in Selling Activity section |
+
 ## Dashboard Layout
 
 ### Section Ordering
@@ -548,6 +645,28 @@ SELECT name, bucket_id, created_at
 FROM storage.objects
 WHERE bucket_id = 'delivery-documents'
 ORDER BY created_at DESC;
+```
+
+### Reset Push Token for User
+```sql
+-- Clear push token from a specific user
+UPDATE profiles
+SET expo_push_token = null
+WHERE email = 'user@example.com';
+
+-- Check which accounts have push tokens
+SELECT id, email, expo_push_token, notify_push
+FROM profiles
+WHERE expo_push_token IS NOT NULL
+ORDER BY updated_at DESC;
+```
+
+### Set User as Seller
+```sql
+-- Enable seller dashboard for a user
+UPDATE profiles
+SET is_seller = true, updated_at = NOW()
+WHERE email = 'user@example.com';
 ```
 
 ## Freight Shipping Modal
@@ -875,6 +994,62 @@ isExpoPushToken('ExponentPushToken[xxxxxx]'); // true
 isExpoPushToken('invalid'); // false
 ```
 
+### Push Token Uniqueness (Device-User Binding)
+**CRITICAL**: Each push token must only be registered to ONE user account. When a user logs in on a device, the token is:
+1. Cleared from all other accounts that had it
+2. Saved to the current user's profile
+
+This prevents duplicate notifications when testing with multiple accounts on one device.
+
+```typescript
+// src/utils/pushNotifications.ts
+export async function savePushToken(userId: string, token: string): Promise<boolean> {
+  try {
+    // First, clear this token from any other accounts
+    const { error: clearError } = await supabase
+      .from('profiles')
+      .update({ expo_push_token: null })
+      .eq('expo_push_token', token)
+      .neq('id', userId);
+
+    if (clearError) {
+      console.log('Note: Could not clear token from other accounts:', clearError.message);
+    }
+
+    // Now save the token to the current user's profile
+    const { error } = await supabase
+      .from('profiles')
+      .update({ expo_push_token: token })
+      .eq('id', userId);
+
+    if (error) {
+      console.error('Error saving push token:', error);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error saving push token:', error);
+    return false;
+  }
+}
+```
+
+### Debugging Duplicate Notifications
+If a device receives notifications for the wrong account:
+```sql
+-- Find all accounts with push tokens
+SELECT id, email, expo_push_token
+FROM profiles
+WHERE expo_push_token IS NOT NULL;
+
+-- Clear token from all accounts except the intended one
+UPDATE profiles
+SET expo_push_token = null
+WHERE expo_push_token IS NOT NULL
+  AND email != 'correct-user@example.com';
+```
+
 ## Future Feature Recommendations
 
 ### High Priority
@@ -916,6 +1091,75 @@ grep -rn "console\." src/ --include="*.tsx" --include="*.ts"
 
 Consider implementing a logging service (e.g., Sentry, LogRocket) for production error tracking. Remove verbose debug logs but keep error logs for diagnostics.
 
+## Animated Splash Screen
+
+### Overview
+The app uses a custom animated splash screen that provides a polished app launch experience with a fade-in + scale animation.
+
+### How It Works
+1. **Native splash** (`expo-splash-screen`) shows immediately on app launch
+2. Once React mounts, native splash hides and animated splash takes over
+3. Logo fades in (0→1 opacity) while scaling up (0.3→1.0) with spring physics
+4. Brief hold (400ms)
+5. Entire screen fades out (400ms)
+6. App content revealed underneath
+
+### Key Files
+- `src/components/AnimatedSplashScreen.tsx` - Animated splash component
+- `App.tsx` - Orchestrates splash screen lifecycle
+
+### Implementation Pattern
+```typescript
+import * as SplashScreen from 'expo-splash-screen';
+import AnimatedSplashScreen from './src/components/AnimatedSplashScreen';
+
+// Prevent native splash from auto-hiding
+SplashScreen.preventAutoHideAsync();
+
+function AppContent() {
+  const [showAnimatedSplash, setShowAnimatedSplash] = useState(true);
+  const [appIsReady, setAppIsReady] = useState(false);
+
+  useEffect(() => {
+    const hideSplash = async () => {
+      await SplashScreen.hideAsync();
+      setAppIsReady(true);
+    };
+    hideSplash();
+  }, []);
+
+  return (
+    <>
+      {/* App content */}
+      {appIsReady && showAnimatedSplash && (
+        <AnimatedSplashScreen onAnimationComplete={() => setShowAnimatedSplash(false)} />
+      )}
+    </>
+  );
+}
+```
+
+### Development vs Production
+- **Expo Go**: Shows Expo's default splash briefly before animated splash (expected behavior)
+- **Development/Production builds**: Shows your configured splash-icon.png seamlessly
+
+### Configuration
+In `app.json`:
+```json
+{
+  "splash": {
+    "image": "./assets/splash-icon.png",
+    "resizeMode": "contain",
+    "backgroundColor": "#ffffff",
+    "dark": {
+      "image": "./assets/splash-icon.png",
+      "backgroundColor": "#0f172a"
+    }
+  },
+  "plugins": ["expo-splash-screen", ...]
+}
+```
+
 ## Performance Optimizations Applied
 
 1. **TanStack Query**: Server state caching with 30-second refetch intervals
@@ -923,6 +1167,7 @@ Consider implementing a logging service (e.g., Sentry, LogRocket) for production
 3. **useMemo/useCallback**: Applied to expensive computations and callbacks
 4. **FlatList**: Used for long lists with proper `keyExtractor`
 5. **Hermes Engine**: Enabled for improved JS performance
+6. **Animated Splash**: Uses native driver for 60fps animations during app launch
 
 ## GitHub Repository
 - Repository: https://github.com/augusthansen/printmailbids-mobile

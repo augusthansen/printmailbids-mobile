@@ -210,6 +210,21 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
   // Get effective seller terms (listing-specific or seller default)
   const effectiveSellerTerms = listing?.seller_terms || sellerProfile?.seller_terms;
 
+  // Default platform terms shown when seller hasn't set custom terms
+  const defaultPlatformTerms = `By placing a bid, you acknowledge and agree to:
+
+• All sales are final and binding once the auction closes
+• Payment is due within 7 days of invoice
+• You are responsible for coordinating pickup or shipping
+• Equipment is sold "as-is, where-is" unless otherwise specified
+• An 8% buyer premium will be added to the winning bid
+
+Please review the listing description and shipping/pickup details carefully before bidding.`;
+
+  // Always have some terms to show - either seller's or platform defaults
+  const termsToShow = effectiveSellerTerms || defaultPlatformTerms;
+  const hasCustomSellerTerms = !!effectiveSellerTerms;
+
   // Format phone number as user types
   const formatPhoneInput = (value: string) => {
     const cleaned = value.replace(/\D/g, '');
@@ -361,8 +376,8 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
         setShowPhoneModal(false);
         setPhoneStep('phone');
 
-        // Check if terms need to be accepted
-        if (effectiveSellerTerms && !termsAccepted) {
+        // Check if terms need to be accepted (always show for first-time bidders)
+        if (!termsAccepted && !listing?.my_bid) {
           setShowTermsModal(true);
         } else {
           // Place the bid
@@ -446,20 +461,27 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
       // Call web API for proper proxy bidding logic
       // The API handles all the complex proxy bid calculations
       console.log('Placing bid with token length:', accessToken.length, 'prefix:', accessToken.substring(0, 20));
-      const response = await fetch(`${API_URL}/bids/place`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          listingId,
-          maxBid,
-        }),
-      });
 
-      const data = await response.json();
-      console.log('Bid API response:', response.status, JSON.stringify(data, null, 2));
+      let response;
+      let data;
+      try {
+        response = await fetch(`${API_URL}/bids/place`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            listingId,
+            maxBid,
+          }),
+        });
+        data = await response.json();
+        console.log('Bid API response:', response.status, JSON.stringify(data, null, 2));
+      } catch (fetchError) {
+        console.error('Network error placing bid:', fetchError);
+        throw new Error('Network error - please check your connection and try again');
+      }
 
       if (!response.ok) {
         // Include debug info in error message for troubleshooting
@@ -553,9 +575,10 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
       return;
     }
 
-    // Check seller terms acceptance (only for first bid on this listing)
+    // Check terms acceptance (only for first bid on this listing)
     // If user already has a bid, they've already accepted the terms
-    if (effectiveSellerTerms && !termsAccepted && !listing?.my_bid) {
+    // Always show terms - either seller's custom terms or platform defaults
+    if (!termsAccepted && !listing?.my_bid) {
       setShowTermsModal(true);
       return;
     }
@@ -1097,7 +1120,9 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
             >
               <Feather name="x" size={24} color={themeColors.textPrimary} />
             </TouchableOpacity>
-            <Text style={[styles.modalTitle, { color: themeColors.textPrimary }]} accessibilityRole="header">Seller Terms & Conditions</Text>
+            <Text style={[styles.modalTitle, { color: themeColors.textPrimary }]} accessibilityRole="header">
+              {hasCustomSellerTerms ? 'Seller Terms & Conditions' : 'Bidding Terms'}
+            </Text>
             <View style={{ width: 44 }} />
           </View>
 
@@ -1108,16 +1133,36 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
                 <Feather name="file-text" size={32} color={themeColors.accent} />
               </View>
               <Text style={[styles.modalSubtitle, { color: themeColors.textMuted }]}>
-                Please review and accept the seller's terms before bidding
+                {hasCustomSellerTerms
+                  ? "Please review and accept the seller's terms before bidding"
+                  : 'Please review and accept the terms before placing your bid'
+                }
               </Text>
             </View>
 
             {/* Terms Content */}
             <View style={[styles.modalTermsCard, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}>
-              <Text style={[styles.modalTermsText, { color: themeColors.textPrimary }]}>
-                {effectiveSellerTerms}
-              </Text>
+              <ScrollView style={{ maxHeight: 280 }} nestedScrollEnabled>
+                <Text style={[styles.modalTermsText, { color: themeColors.textPrimary }]}>
+                  {termsToShow}
+                </Text>
+              </ScrollView>
             </View>
+
+            {/* Shipping Details Reminder (when no custom seller terms) */}
+            {!hasCustomSellerTerms && listing?.shipping_info && (
+              <View style={[styles.shippingReminder, { backgroundColor: themeColors.accentFaint, borderColor: themeColors.accent }]}>
+                <Feather name="truck" size={16} color={themeColors.accent} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.shippingReminderTitle, { color: themeColors.accent }]}>
+                    Shipping & Pickup Details
+                  </Text>
+                  <Text style={[styles.shippingReminderText, { color: themeColors.textSecondary }]}>
+                    {listing.shipping_info}
+                  </Text>
+                </View>
+              </View>
+            )}
 
             {/* Checkbox */}
             <TouchableOpacity
@@ -1134,7 +1179,10 @@ export default function PlaceBidScreen({ route, navigation }: Props) {
                 {termsAccepted && <Feather name="check" size={14} color={colors.white} />}
               </View>
               <Text style={[styles.modalCheckboxText, { color: themeColors.textSecondary }]}>
-                I have read and agree to the seller's terms and conditions for this listing
+                {hasCustomSellerTerms
+                  ? "I have read and agree to the seller's terms and conditions for this listing"
+                  : 'I have reviewed the listing details and agree to the bidding terms'
+                }
               </Text>
             </TouchableOpacity>
 
@@ -1707,6 +1755,24 @@ const styles = StyleSheet.create({
   modalTermsText: {
     fontSize: fontSize.sm,
     lineHeight: 22,
+  },
+  shippingReminder: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    marginBottom: spacing.lg,
+  },
+  shippingReminderTitle: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+    marginBottom: spacing.xs,
+  },
+  shippingReminderText: {
+    fontSize: fontSize.sm,
+    lineHeight: 20,
   },
   modalCheckboxRow: {
     flexDirection: 'row',

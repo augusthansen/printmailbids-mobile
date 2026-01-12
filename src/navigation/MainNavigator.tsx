@@ -191,10 +191,10 @@ const headerStyles = StyleSheet.create({
 
 // Hook to get dynamic header options
 function useHeaderOptions() {
-  const { colors: themeColors, isDark } = useTheme();
+  const { colors: themeColors } = useTheme();
   return {
     headerStyle: {
-      backgroundColor: isDark ? themeColors.sand : '#ffffff',
+      backgroundColor: themeColors.background,
     },
     headerTitleStyle: {
       fontWeight: fontWeight.semibold as '600',

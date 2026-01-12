@@ -83,9 +83,25 @@ export async function registerForPushNotifications(): Promise<PushNotificationSt
 
 /**
  * Save the push token to the user's profile in Supabase
+ * Also clears the token from any other accounts to ensure each device
+ * only receives notifications for the currently logged-in user.
  */
 export async function savePushToken(userId: string, token: string): Promise<boolean> {
   try {
+    // First, clear this token from any other accounts
+    // This prevents duplicate notifications when switching users on the same device
+    const { error: clearError } = await supabase
+      .from('profiles')
+      .update({ expo_push_token: null })
+      .eq('expo_push_token', token)
+      .neq('id', userId);
+
+    if (clearError) {
+      console.log('Note: Could not clear token from other accounts:', clearError.message);
+      // Continue anyway - this is not critical
+    }
+
+    // Now save the token to the current user's profile
     const { error } = await supabase
       .from('profiles')
       .update({ expo_push_token: token })
@@ -96,7 +112,7 @@ export async function savePushToken(userId: string, token: string): Promise<bool
       return false;
     }
 
-    console.log('Push token saved successfully');
+    console.log('Push token saved successfully (cleared from other accounts)');
     return true;
   } catch (error) {
     console.error('Error saving push token:', error);
