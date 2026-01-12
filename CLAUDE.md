@@ -745,13 +745,142 @@ npx eas submit --platform ios
 - ✅ Minimum touch target 44pt (Apple HIG)
 - ✅ Accessibility labels on interactive elements
 
+## Push Notifications
+
+### Overview
+Push notifications are implemented using Expo's push notification service. The mobile app registers for push tokens on startup and saves them to the user's profile. The web API sends notifications via Expo's push API.
+
+### Key Files
+- `src/utils/pushNotifications.ts` - Token registration, permission requests
+- `src/contexts/NotificationContext.tsx` - App-wide notification state
+- `App.tsx` - Registers push token on startup, handles notification responses
+- `src/screens/profile/NotificationSettingsScreen.tsx` - User can toggle push on/off, test buttons
+
+### EAS Project Configuration
+```json
+// app.json
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "b4ede531-5a40-4e91-b4ad-da3142170e95"
+      }
+    }
+  }
+}
+```
+
+### Database Fields
+```typescript
+// profiles table
+expo_push_token: string | null;  // Expo push token (ExponentPushToken[...])
+notify_push: boolean;            // User's push notification preference
+```
+
+### Push Token Registration Flow
+```typescript
+// In App.tsx on startup
+import { registerForPushNotificationsAsync, savePushTokenToProfile } from './src/utils/pushNotifications';
+
+// After user authenticates
+const token = await registerForPushNotificationsAsync();
+if (token && session?.user?.id) {
+  await savePushTokenToProfile(supabase, session.user.id, token);
+}
+```
+
+### Notification Events Covered
+All major events send push notifications via the unified notification service:
+
+| Event | Recipient | Web API Endpoint |
+|-------|-----------|------------------|
+| Outbid | Previous high bidder | `POST /api/bids/place` |
+| New bid on listing | Seller | `POST /api/bids/place` |
+| Reserve price met | Seller | `POST /api/bids/place` |
+| Auction won | Winning buyer | `POST /api/auctions/process-ended` |
+| Auction ended | Seller | `POST /api/auctions/process-ended` |
+| Reserve not met | All bidders | `POST /api/auctions/process-ended` |
+| New offer | Seller | `POST /api/offers/submit` |
+| Offer accepted | Buyer | `POST /api/offers/respond` |
+| Offer declined | Buyer | `POST /api/offers/respond` |
+| Offer countered | Recipient | `POST /api/offers/respond` |
+| Payment received | Seller | Stripe webhook |
+| Payment confirmed | Buyer | Stripe webhook |
+| Item shipped | Buyer | `POST /api/invoices/ship` |
+| New message | Recipient | `POST /api/messages/send` |
+
+### Web App Notification Service
+Located at `src/lib/notifications/index.ts` in the web app:
+```typescript
+import notifications from '@/lib/notifications';
+
+// Send outbid notification with push
+await notifications.outbid(userId, listingId, listingTitle, newHighBid);
+
+// Send auction won notification
+await notifications.auctionWon(buyerId, listingId, listingTitle, winningBid, invoiceId);
+
+// Generic notification
+import { sendNotification } from '@/lib/notifications';
+await sendNotification({
+  userId,
+  type: 'payment_confirmed',
+  title: 'Payment Confirmed',
+  body: 'Your payment has been processed.',
+  listingId,
+  invoiceId,
+});
+```
+
+### Important: Awaiting Notifications in Vercel
+Serverless functions (Vercel) may terminate before async operations complete. Always **await** notification calls to ensure push is sent:
+```typescript
+// CORRECT - await the notification
+try {
+  const result = await notifications.outbid(userId, listingId, title, amount);
+  console.log('Notification result:', { success: result.success, pushSent: result.pushSent });
+} catch (err) {
+  console.error('Failed to send notification:', err);
+}
+
+// WRONG - function may terminate before push is sent
+notifications.outbid(userId, listingId, title, amount).catch(console.error);
+```
+
+### Testing Push Notifications
+The NotificationSettingsScreen has two test buttons:
+1. **Send Local Test** - Triggers a local notification (no server)
+2. **Send Server Push** - Calls `POST /api/test/push-notification` to test full flow
+
+### Debugging Push Issues
+Check Vercel logs for these entries:
+```
+[Notification] Sending notification: { type, userId, title }
+[Notification] User preferences: { notify_push, hasToken, tokenPrefix }
+[Notification] Push check: { skipPush, notify_push, hasToken, isValidToken }
+[Notification] Push result: { pushSent, error }
+```
+
+If `pushSent: false`, check:
+1. User has `notify_push: true` in profile
+2. User has valid `expo_push_token` saved
+3. Token format is valid (`ExponentPushToken[...]`)
+
+### Token Validation
+```typescript
+import { isExpoPushToken } from '@/lib/push';
+
+// Returns true for valid tokens
+isExpoPushToken('ExponentPushToken[xxxxxx]'); // true
+isExpoPushToken('invalid'); // false
+```
+
 ## Future Feature Recommendations
 
 ### High Priority
-1. **Push Notifications**: Implement full push notification handling for bid updates, messages, and order status
-2. **Biometric Authentication**: Add Face ID/Touch ID for quick sign-in (plugin already configured)
-3. **Offline Support**: Cache listings and allow offline browsing with TanStack Query persistence
-4. **Search Screen**: Implement advanced search with filters (category, location, price range)
+1. **Biometric Authentication**: Add Face ID/Touch ID for quick sign-in (plugin already configured)
+2. **Offline Support**: Cache listings and allow offline browsing with TanStack Query persistence
+3. **Search Screen**: Implement advanced search with filters (category, location, price range)
 
 ### Medium Priority
 1. **Seller Profile Screen**: View seller ratings, past sales, and contact info
