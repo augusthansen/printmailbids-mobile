@@ -927,6 +927,8 @@ All major events send push notifications via the unified notification service:
 | Payment confirmed | Buyer | Stripe webhook |
 | Item shipped | Buyer | `POST /api/invoices/ship` |
 | New message | Recipient | `POST /api/messages/send` |
+| Wire payment requested | Seller | `POST /api/wire/request-instructions` |
+| Wire instructions available | Buyer | `POST /api/wire/notify-available` |
 
 ### Web App Notification Service
 Located at `src/lib/notifications/index.ts` in the web app:
@@ -1168,6 +1170,166 @@ In `app.json`:
 4. **FlatList**: Used for long lists with proper `keyExtractor`
 5. **Hermes Engine**: Enabled for improved JS performance
 6. **Animated Splash**: Uses native driver for 60fps animations during app launch
+
+## Wire Payment Request Flow
+
+### Overview
+When a seller hasn't set up wire transfer instructions, buyers can request them. This triggers a notification flow that guides sellers to add their bank details, then notifies buyers when wire payment becomes available.
+
+### Complete Flow
+1. **Buyer** opens Checkout screen for an invoice
+2. Wire Transfer option shows as unavailable (seller has no wire details)
+3. Buyer taps "Request Wire Instructions"
+4. **Seller** receives in-app + push notification: "Wire Payment Requested"
+5. Seller taps notification → navigates to Wire Instructions screen
+6. Seller enters bank details and saves
+7. **Buyer** receives in-app + push notification: "Wire Instructions Available"
+8. Buyer taps notification → navigates to Checkout screen
+9. Wire Transfer is now selectable
+
+### Key Files
+- `src/screens/checkout/CheckoutScreen.tsx` - Wire request button and payment selection
+- `src/screens/profile/WireInstructionsScreen.tsx` - Seller enters bank details
+- `src/screens/activity/DashboardScreen.tsx` - Notification press handlers
+
+### API Endpoints (Web App)
+```typescript
+// Buyer requests wire instructions from seller
+POST ${API_URL}/wire/request-instructions
+Body: { invoiceId }
+Response: { success, message, pushSent }
+
+// Seller notifies buyers wire is available (called automatically on save)
+POST ${API_URL}/wire/notify-available
+Body: {} // Uses authenticated user as seller
+Response: { success, notified, pushSent }
+```
+
+### Database Fields
+```typescript
+// invoices table
+wire_requested_at: string | null;  // Timestamp when buyer requested wire
+
+// profiles table (seller wire details)
+wire_bank_name: string | null;
+wire_routing_number: string | null;
+wire_account_number: string | null;
+wire_account_name: string | null;
+wire_bank_address: string | null;
+wire_swift_code: string | null;
+wire_additional_instructions: string | null;
+```
+
+### Notification Handling
+Wire notifications use `payment_reminder` type but have specific titles for routing:
+```typescript
+// In DashboardScreen.tsx handleNotificationPress:
+if (notification.title === 'Wire Payment Requested') {
+  navigation.navigate('ProfileTab', { screen: 'WireInstructions' });
+  return;
+}
+
+if (notification.title === 'Wire Instructions Available' && notification.invoice_id) {
+  navigation.navigate('Checkout', { invoiceId: notification.invoice_id });
+  return;
+}
+```
+
+### Testing Wire Flow
+Test buttons are available in **Profile > Notification Settings > Test Wire Payment Flow**:
+- **Orange button**: "Test Wire Request (Seller)" - Simulates buyer requesting wire
+- **Green button**: "Test Wire Available (Buyer)" - Simulates seller adding wire details
+
+### SQL Helpers
+```sql
+-- Check wire request status for an invoice
+SELECT id, wire_requested_at, status
+FROM invoices
+WHERE id = 'INVOICE_UUID';
+
+-- Clear wire request for testing
+UPDATE invoices
+SET wire_requested_at = null
+WHERE id = 'INVOICE_UUID';
+
+-- Check seller wire details
+SELECT wire_bank_name, wire_routing_number, wire_account_number
+FROM profiles
+WHERE id = 'SELLER_UUID';
+
+-- Clear seller wire details for testing
+UPDATE profiles
+SET wire_bank_name = null, wire_routing_number = null, wire_account_number = null,
+    wire_account_name = null, wire_bank_address = null, wire_swift_code = null
+WHERE id = 'SELLER_UUID';
+```
+
+## Dashboard Notifications Modal
+
+### Mark All Read
+The notification bell modal includes a "Mark All Read" button that appears when there are unread notifications:
+```typescript
+// DashboardScreen.tsx
+const markAllReadMutation = useMutation({
+  mutationFn: async () => {
+    const { error } = await supabase
+      .from('notifications')
+      .update({ is_read: true, read_at: new Date().toISOString() })
+      .eq('user_id', user.id)
+      .eq('is_read', false);
+    if (error) throw error;
+  },
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['notifications'] });
+  },
+});
+```
+
+## Offer Filtering Logic
+
+### Dashboard "Open Offers" Count
+The Dashboard shows an "Open Offers" count that only includes offers where:
+1. Offer status is `pending`
+2. **Listing status is NOT `sold`**
+
+This ensures completed transactions don't appear in the open offers count.
+
+```typescript
+// DashboardScreen.tsx - Buyer stats query
+const pendingOffers = (pendingOffersResult.data || []).filter(offer => {
+  const listingStatus = getOfferListingStatus(offer.listing);
+  return listingStatus !== 'sold';
+});
+```
+
+### MyOffersScreen Filtering
+The offers list (`MyOffersScreen.tsx`) filters offers to show only actionable items:
+- Hide ALL offers when listing status is `sold`
+- Only show active statuses: `pending`, `countered`, `accepted`
+- Hide terminal states: `declined`, `expired`, `withdrawn`
+
+```typescript
+const filteredOffers = offers?.filter(offer => {
+  // If listing is sold, hide ALL offers for that listing
+  if (offer.listing?.status === 'sold') {
+    return false;
+  }
+
+  // Only show active/actionable offers
+  const activeStatuses = ['pending', 'countered', 'accepted'];
+  if (filter === 'all') {
+    return activeStatuses.includes(offer.status);
+  }
+  return offer.status === filter;
+});
+```
+
+### Offer Lifecycle
+1. **Buyer makes offer** → status: `pending`
+2. **Seller can**: Accept (creates invoice, listing → `sold`), Decline, or Counter
+3. **If countered** → new offer with `parent_offer_id`, original becomes `countered`
+4. **If accepted** → offer `accepted`, invoice created, listing `sold`
+5. Once listing is `sold`, all offers for that listing are hidden from "Open Offers"
 
 ## GitHub Repository
 - Repository: https://github.com/augusthansen/printmailbids-mobile

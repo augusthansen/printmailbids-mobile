@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -22,15 +22,51 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { formatCurrency, formatRelativeTime } from '../../utils/formatters';
 import { lightTap } from '../../utils/haptics';
 
+// Greeting messages that rotate based on time of day and randomness
+function getGreeting(name: string): { welcome: string; subtitle: string } {
+  const hour = new Date().getHours();
+  const random = Math.random();
+
+  // Time-based greetings
+  if (hour < 12) {
+    // Morning greetings
+    const morningGreetings = [
+      { welcome: `Good morning, ${name}`, subtitle: "Let's see what's happening today." },
+      { welcome: `Morning, ${name}`, subtitle: "Ready to find your next deal?" },
+      { welcome: `Good morning, ${name}`, subtitle: "Here's your activity overview." },
+      { welcome: `Rise and shine, ${name}`, subtitle: "Your dashboard is ready." },
+    ];
+    return morningGreetings[Math.floor(random * morningGreetings.length)];
+  } else if (hour < 17) {
+    // Afternoon greetings
+    const afternoonGreetings = [
+      { welcome: `Good afternoon, ${name}`, subtitle: "Let's check on your activity." },
+      { welcome: `Hey there, ${name}`, subtitle: "Here's what's going on today." },
+      { welcome: `Welcome back, ${name}`, subtitle: "Your dashboard awaits." },
+      { welcome: `Good to see you, ${name}`, subtitle: "Let's dive into the action." },
+    ];
+    return afternoonGreetings[Math.floor(random * afternoonGreetings.length)];
+  } else {
+    // Evening greetings
+    const eveningGreetings = [
+      { welcome: `Good evening, ${name}`, subtitle: "Here's your latest activity." },
+      { welcome: `Evening, ${name}`, subtitle: "Let's see what you've missed." },
+      { welcome: `Welcome back, ${name}`, subtitle: "Winding down? Here's your summary." },
+      { welcome: `Hey ${name}`, subtitle: "Quick look at your dashboard." },
+    ];
+    return eveningGreetings[Math.floor(random * eveningGreetings.length)];
+  }
+}
+
 interface BuyerStats {
   activeBids: number;
   winningBids: number;
   pendingOffers: number;
-  acceptedOffers: number;  // Offers accepted but not yet paid
+  acceptedOffers: number;
   unpaidInvoices: number;
   totalPurchases: number;
   pipelineValue: number;
-  activeTransactions: number;  // Paid but not yet completed/delivered
+  activeTransactions: number;
   activeTransactionsAmount: number;
 }
 
@@ -41,25 +77,12 @@ interface SellerStats {
   totalRevenue: number;
   pendingPayouts: number;
   totalViews: number;
-  activeTransactions: number;  // All non-completed transactions
+  activeTransactions: number;
   activeTransactionsAmount: number;
-  awaitingPayment: number;  // Specifically unpaid invoices
+  awaitingPayment: number;
 }
 
-interface RecentActivity {
-  id: string;
-  type: 'bid' | 'offer' | 'purchase' | 'sale' | 'message';
-  title: string;
-  subtitle: string;
-  amount?: number;
-  timestamp: string;
-  icon: keyof typeof Feather.glyphMap;
-  iconColor: string;
-  iconBg: string;
-  isReceived?: boolean; // For offers - determines color at render time
-}
-
-// Helper function to get notification icon config - accepts theme colors for dark mode support
+// Helper function to get notification icon config
 function getNotificationConfig(type: NotificationType, themeColors: ThemeColors): { icon: keyof typeof Feather.glyphMap; iconColor: string; iconBg: string } {
   switch (type) {
     case 'outbid':
@@ -102,46 +125,46 @@ export default function DashboardScreen() {
   const { colors: themeColors, isDark } = useTheme();
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
 
+  // Memoize greeting so it doesn't change on every re-render (only when profile changes)
+  const greeting = useMemo(() => {
+    const name = profile?.full_name?.split(' ')[0] || profile?.company_name || 'there';
+    return getGreeting(name);
+  }, [profile?.full_name, profile?.company_name]);
+
   // Fetch buyer stats
   const { data: buyerStats, isLoading: loadingBuyer, refetch: refetchBuyer } = useQuery<BuyerStats>({
     queryKey: ['buyerStats', user?.id],
-    staleTime: 0, // Always refetch to ensure fresh bid statuses
+    staleTime: 0,
     refetchOnMount: 'always',
     queryFn: async () => {
       if (!user) return { activeBids: 0, winningBids: 0, pendingOffers: 0, acceptedOffers: 0, unpaidInvoices: 0, totalPurchases: 0, pipelineValue: 0, activeTransactions: 0, activeTransactionsAmount: 0 };
 
       const [bidsResult, pendingOffersResult, acceptedOffersResult, invoicesResult, paidInvoicesResult, activeTransactionsResult] = await Promise.all([
-        // Active and winning bids - include listing to check if auction is still active
         supabase
           .from('bids')
           .select('id, status, amount, listing_id, listing:listings(id, status)')
           .eq('bidder_id', user.id)
           .in('status', ['active', 'winning']),
-        // Pending offers (awaiting seller response)
         supabase
           .from('offers')
-          .select('id', { count: 'exact', head: true })
+          .select('id, listing:listings(status)')
           .eq('buyer_id', user.id)
           .eq('status', 'pending'),
-        // Accepted offers (need to pay!)
         supabase
           .from('offers')
           .select('id, amount, listing:listings(title)')
           .eq('buyer_id', user.id)
           .eq('status', 'accepted'),
-        // Unpaid invoices
         supabase
           .from('invoices')
           .select('id, total_amount')
           .eq('buyer_id', user.id)
           .eq('status', 'pending'),
-        // Paid invoices (total purchases)
         supabase
           .from('invoices')
           .select('id', { count: 'exact', head: true })
           .eq('buyer_id', user.id)
           .eq('status', 'paid'),
-        // Active transactions (paid but not yet completed)
         supabase
           .from('invoices')
           .select('id, total_amount, fulfillment_status, delivery_confirmed_at')
@@ -151,11 +174,6 @@ export default function DashboardScreen() {
 
       const bids = bidsResult.data || [];
 
-      // Filter bids to only include those on active listings
-      // A bid is only truly "winning" if:
-      // 1. The bid status is 'winning'
-      // 2. The listing is still active (not ended, sold, etc.)
-      // Note: Supabase may return joined data as array or object depending on the relationship
       type ListingData = { id: string; status: string } | { id: string; status: string }[] | null;
       const getListingStatus = (listing: ListingData): string | undefined => {
         if (!listing) return undefined;
@@ -172,7 +190,6 @@ export default function DashboardScreen() {
         return b.status === 'winning' && listingStatus === 'active';
       });
 
-      // Count unique listings, not total bids (user can have multiple bids on same listing)
       const uniqueActiveListings = new Set(activeBidsData.map(b => b.listing_id));
       const uniqueWinningListings = new Set(winningBidsData.map(b => b.listing_id));
       const activeBids = uniqueActiveListings.size;
@@ -180,22 +197,30 @@ export default function DashboardScreen() {
       const unpaidInvoices = invoicesResult.data || [];
       const pipelineValue = unpaidInvoices.reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
 
-      // Active transactions = paid but not yet completed
       const allPaidInvoices = activeTransactionsResult.data || [];
       const activeTransactions = allPaidInvoices.filter(inv => {
-        // If completed, it's not active
         if (inv.fulfillment_status === 'completed') return false;
-        // If delivered AND confirmed, it's not active
         if (inv.fulfillment_status === 'delivered' && inv.delivery_confirmed_at) return false;
-        // Everything else is active
         return true;
       });
       const activeTransactionsAmount = activeTransactions.reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
 
+      // Filter pending offers to exclude those where listing is sold
+      type OfferListingData = { status: string } | { status: string }[] | null;
+      const getOfferListingStatus = (listing: OfferListingData): string | undefined => {
+        if (!listing) return undefined;
+        if (Array.isArray(listing)) return listing[0]?.status;
+        return listing.status;
+      };
+      const pendingOffers = (pendingOffersResult.data || []).filter(offer => {
+        const listingStatus = getOfferListingStatus(offer.listing as OfferListingData);
+        return listingStatus !== 'sold';
+      });
+
       return {
         activeBids,
         winningBids,
-        pendingOffers: pendingOffersResult.count || 0,
+        pendingOffers: pendingOffers.length,
         acceptedOffers: acceptedOffersResult.data?.length || 0,
         unpaidInvoices: unpaidInvoices.length,
         totalPurchases: paidInvoicesResult.count || 0,
@@ -207,31 +232,27 @@ export default function DashboardScreen() {
     enabled: !!user,
   });
 
-  // Fetch seller stats (only if seller)
+  // Fetch seller stats
   const { data: sellerStats, isLoading: loadingSeller, refetch: refetchSeller } = useQuery<SellerStats>({
     queryKey: ['sellerStats', user?.id],
     queryFn: async () => {
       if (!user) return { activeListings: 0, totalSales: 0, pendingOffers: 0, totalRevenue: 0, pendingPayouts: 0, totalViews: 0, activeTransactions: 0, activeTransactionsAmount: 0, awaitingPayment: 0 };
 
       const [listingsResult, salesResult, offersResult, viewsResult] = await Promise.all([
-        // Active listings
         supabase
           .from('listings')
           .select('id', { count: 'exact', head: true })
           .eq('seller_id', user.id)
           .eq('status', 'active'),
-        // All invoices (for completed sales and pending transactions)
         supabase
           .from('invoices')
           .select('id, seller_payout_amount, total_amount, status, fulfillment_status, delivery_confirmed_at')
           .eq('seller_id', user.id),
-        // Pending offers received
         supabase
           .from('offers')
-          .select('id', { count: 'exact', head: true })
+          .select('id, listing:listings(status)')
           .eq('seller_id', user.id)
           .eq('status', 'pending'),
-        // Total listing views
         supabase
           .from('listings')
           .select('view_count')
@@ -241,20 +262,13 @@ export default function DashboardScreen() {
       const sales = salesResult.data || [];
       const paidSales = sales.filter(s => s.status === 'paid');
 
-      // Active transactions = any invoice not yet completed (excluding cancelled/expired)
-      // A transaction is complete when: fulfillment_status is 'completed' OR delivery_confirmed_at is set
       const activeSales = sales.filter(s => {
-        // Exclude cancelled or expired invoices
         if (s.status === 'cancelled' || s.status === 'expired' || s.status === 'refunded') return false;
-        // If completed, it's not active
         if (s.fulfillment_status === 'completed') return false;
-        // If delivery was confirmed (regardless of fulfillment_status), it's not active
         if (s.delivery_confirmed_at) return false;
-        // Everything else is active (pending, paid, packaging, ready_for_pickup, shipped, or delivered but not confirmed)
         return true;
       });
 
-      // Awaiting payment = unpaid invoices specifically
       const awaitingPaymentSales = sales.filter(s =>
         s.status === 'pending' ||
         s.status === 'awaiting_wire' ||
@@ -267,10 +281,22 @@ export default function DashboardScreen() {
       const pendingTransactionsAmount = activeSales.reduce((sum, s) => sum + (s.total_amount || 0), 0);
       const totalViews = (viewsResult.data || []).reduce((sum, l) => sum + (l.view_count || 0), 0);
 
+      // Filter pending offers to exclude those where listing is sold
+      type SellerOfferListingData = { status: string } | { status: string }[] | null;
+      const getSellerOfferListingStatus = (listing: SellerOfferListingData): string | undefined => {
+        if (!listing) return undefined;
+        if (Array.isArray(listing)) return listing[0]?.status;
+        return listing.status;
+      };
+      const sellerPendingOffers = (offersResult.data || []).filter(offer => {
+        const listingStatus = getSellerOfferListingStatus(offer.listing as SellerOfferListingData);
+        return listingStatus !== 'sold';
+      });
+
       return {
         activeListings: listingsResult.count || 0,
         totalSales: paidSales.length,
-        pendingOffers: offersResult.count || 0,
+        pendingOffers: sellerPendingOffers.length,
         totalRevenue,
         pendingPayouts,
         totalViews,
@@ -280,70 +306,6 @@ export default function DashboardScreen() {
       };
     },
     enabled: !!user && (!!profile?.is_seller || !!profile?.is_admin),
-  });
-
-  // Fetch recent activity
-  const { data: recentActivity, refetch: refetchActivity } = useQuery<RecentActivity[]>({
-    queryKey: ['recentActivity', user?.id],
-    queryFn: async () => {
-      if (!user) return [];
-
-      // Get recent bids
-      const { data: bids } = await supabase
-        .from('bids')
-        .select('id, amount, status, created_at, listing:listings(title)')
-        .eq('bidder_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(3);
-
-      // Get recent offers
-      const { data: offers } = await supabase
-        .from('offers')
-        .select('id, amount, status, created_at, buyer_id, seller_id, listing:listings(title)')
-        .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
-        .order('created_at', { ascending: false })
-        .limit(3);
-
-      const activities: RecentActivity[] = [];
-
-      // Add bids - note: colors set at render time via themeColors
-      (bids || []).forEach(bid => {
-        activities.push({
-          id: `bid-${bid.id}`,
-          type: 'bid',
-          title: 'Bid Placed',
-          subtitle: (bid.listing as { title?: string })?.title || 'Unknown listing',
-          amount: bid.amount,
-          timestamp: bid.created_at,
-          icon: 'trending-up',
-          iconColor: '', // Will be set at render time
-          iconBg: '',
-        });
-      });
-
-      // Add offers - note: colors set at render time via themeColors
-      (offers || []).forEach(offer => {
-        const isReceived = (offer as { seller_id?: string }).seller_id === user.id;
-        activities.push({
-          id: `offer-${offer.id}`,
-          type: 'offer',
-          title: isReceived ? 'Offer Received' : 'Offer Sent',
-          subtitle: (offer.listing as { title?: string })?.title || 'Unknown listing',
-          amount: offer.amount,
-          timestamp: offer.created_at,
-          icon: 'message-square',
-          iconColor: '', // Will be set at render time
-          iconBg: '',
-          isReceived, // Store for color determination at render
-        } as RecentActivity);
-      });
-
-      // Sort by timestamp and limit
-      return activities
-        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-        .slice(0, 5);
-    },
-    enabled: !!user,
   });
 
   // Fetch notifications
@@ -357,7 +319,7 @@ export default function DashboardScreen() {
         .select('*')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
-        .limit(10);
+        .limit(20);
 
       if (error) throw error;
       return (data || []) as Notification[];
@@ -380,38 +342,76 @@ export default function DashboardScreen() {
     },
   });
 
+  // Mark all notifications as read mutation
+  const markAllReadMutation = useMutation({
+    mutationFn: async () => {
+      if (!user) return;
+
+      const { error } = await supabase
+        .from('notifications')
+        .update({ is_read: true, read_at: new Date().toISOString() })
+        .eq('user_id', user.id)
+        .eq('is_read', false);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    },
+  });
+
   const unreadNotifications = notifications?.filter(n => !n.is_read) || [];
-  const recentNotifications = notifications?.slice(0, 3) || [];
 
   const handleNotificationPress = (notification: Notification) => {
     lightTap();
 
-    // Mark as read
     if (!notification.is_read) {
       markReadMutation.mutate(notification.id);
     }
 
-    // Navigate based on notification type - check specific types first, then fall back to IDs
+    // Special handling for wire payment request notifications
+    // These are sent as 'payment_reminder' type but have a specific title
+    if (notification.title === 'Wire Payment Requested') {
+      // Navigate directly to Wire Instructions screen so seller can add bank details
+      navigation.navigate('ProfileTab', { screen: 'WireInstructions' });
+      return;
+    }
+
+    // Special handling for wire instructions available notifications
+    // Navigate buyer to checkout screen so they can pay via wire
+    if (notification.title === 'Wire Instructions Available' && notification.invoice_id) {
+      navigation.navigate('Checkout', { invoiceId: notification.invoice_id });
+      return;
+    }
+
     const offerTypes: NotificationType[] = ['new_offer', 'offer_accepted', 'offer_declined', 'offer_countered', 'offer_expired', 'offer_withdrawn', 'offer_response_needed'];
     const bidTypes: NotificationType[] = ['outbid', 'auction_won', 'new_bid', 'auction_ending_soon', 'auction_ending'];
     const invoiceTypes: NotificationType[] = ['payment_reminder', 'payment_received', 'payment_confirmed', 'item_shipped', 'item_delivered'];
 
     if (offerTypes.includes(notification.type)) {
-      // For offer_accepted with invoice_id, go directly to invoice for payment
       if (notification.type === 'offer_accepted' && notification.invoice_id) {
         navigation.navigate('InvoiceDetail', { invoiceId: notification.invoice_id });
         return;
       }
 
-      // For other offer notifications, determine the appropriate view and filter
-      // new_offer = seller received a new offer
-      // offer_countered = other party countered your offer
-      // offer_declined/withdrawn/expired = response to your offer
-      const sellerReceivedTypes: NotificationType[] = ['new_offer'];
-      const isSellerNotification = sellerReceivedTypes.includes(notification.type);
+      // Determine view mode based on notification type and user role
+      // For 'new_offer' - seller receives, go to received
+      // For 'offer_countered' - need to check if user is seller (received) or buyer (sent)
+      // For other offer types - default to sent
+      let targetViewMode: 'sent' | 'received' = 'sent';
+
+      if (notification.type === 'new_offer') {
+        // New offers are always received by sellers
+        targetViewMode = 'received';
+      } else if (notification.type === 'offer_countered' && profile?.is_seller) {
+        // If user is a seller and receives counter offer notification,
+        // they likely need to see their received offers (buyer countered their counter)
+        // Navigate to received so they can toggle if needed
+        targetViewMode = 'received';
+      }
 
       navigation.navigate('MyOffers', {
-        viewMode: isSellerNotification ? 'received' : 'sent',
+        viewMode: targetViewMode,
         filter: notification.type === 'offer_accepted' ? 'accepted' : 'pending',
       });
     } else if (invoiceTypes.includes(notification.type) && notification.invoice_id) {
@@ -434,77 +434,20 @@ export default function DashboardScreen() {
   };
 
   const onRefresh = async () => {
-    await Promise.all([refetchBuyer(), refetchSeller(), refetchActivity(), refetchNotifications()]);
+    await Promise.all([refetchBuyer(), refetchSeller(), refetchNotifications()]);
   };
 
-  const navigateTo = (screen: string) => {
+  const navigateTo = (screen: string, params?: object) => {
     lightTap();
-    navigation.navigate(screen as never);
+    navigation.navigate(screen as never, params as never);
   };
-
-  const StatCard = ({
-    icon,
-    iconColor,
-    iconBg,
-    value,
-    label,
-    onPress,
-  }: {
-    icon: keyof typeof Feather.glyphMap;
-    iconColor: string;
-    iconBg: string;
-    value: string | number;
-    label: string;
-    onPress?: () => void;
-  }) => (
-    <TouchableOpacity
-      style={[styles.statCard, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}
-      onPress={onPress}
-      disabled={!onPress}
-      activeOpacity={onPress ? 0.7 : 1}
-    >
-      <View style={[styles.statIcon, { backgroundColor: iconBg }]}>
-        <Feather name={icon} size={20} color={iconColor} />
-      </View>
-      <Text style={[styles.statValue, { color: themeColors.textPrimary }]}>{value}</Text>
-      <Text style={[styles.statLabel, { color: themeColors.textMuted }]}>{label}</Text>
-    </TouchableOpacity>
-  );
-
-  const ActionCard = ({
-    icon,
-    title,
-    subtitle,
-    badge,
-    badgeColor,
-    onPress,
-  }: {
-    icon: keyof typeof Feather.glyphMap;
-    title: string;
-    subtitle: string;
-    badge?: number;
-    badgeColor?: string;
-    onPress: () => void;
-  }) => (
-    <TouchableOpacity style={styles.actionCard} onPress={onPress} activeOpacity={0.7}>
-      <View style={[styles.actionIconContainer, { backgroundColor: themeColors.accentFaint }]}>
-        <Feather name={icon} size={20} color={themeColors.accent} />
-      </View>
-      <View style={styles.actionContent}>
-        <Text style={[styles.actionTitle, { color: themeColors.textPrimary }]}>{title}</Text>
-        <Text style={[styles.actionSubtitle, { color: themeColors.textMuted }]}>{subtitle}</Text>
-      </View>
-      {badge ? (
-        <View style={[styles.badge, badgeColor && { backgroundColor: badgeColor }]}>
-          <Text style={styles.badgeText}>{badge}</Text>
-        </View>
-      ) : (
-        <Feather name="chevron-right" size={20} color={themeColors.textLight} />
-      )}
-    </TouchableOpacity>
-  );
 
   const isLoading = loadingBuyer || loadingSeller;
+
+  // Calculate if there are any urgent items
+  const hasUrgentItems = (buyerStats?.unpaidInvoices || 0) > 0 ||
+    (buyerStats?.activeTransactions || 0) > 0 ||
+    ((profile?.is_seller || profile?.is_admin) && (sellerStats?.activeTransactions || 0) > 0);
 
   return (
     <ScrollView
@@ -514,447 +457,454 @@ export default function DashboardScreen() {
         <RefreshControl refreshing={isLoading} onRefresh={onRefresh} tintColor={themeColors.accent} />
       }
     >
-      {/* Welcome Header */}
+      {/* Header with Greeting Card */}
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={[styles.welcomeText, { color: themeColors.textMuted }]}>Welcome back,</Text>
-          <Text style={[styles.userName, { color: themeColors.textPrimary }]}>{profile?.full_name || profile?.company_name || 'User'}</Text>
-        </View>
-        <TouchableOpacity
-          style={[styles.notificationBell, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}
-          onPress={() => {
-            lightTap();
-            setShowNotificationsModal(true);
-          }}
+        <View
+          style={[
+            styles.greetingCard,
+            {
+              backgroundColor: isDark
+                ? 'rgba(37, 99, 235, 0.15)'
+                : 'linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)',
+            },
+            isDark ? {} : { backgroundColor: '#EFF6FF' },
+          ]}
         >
-          <Feather name="bell" size={24} color={themeColors.textPrimary} />
-          {unreadNotifications.length > 0 && (
-            <View style={styles.notificationBadge}>
-              <Text style={styles.notificationBadgeText}>
-                {unreadNotifications.length > 9 ? '9+' : unreadNotifications.length}
+          <View style={styles.greetingContent}>
+            <View style={styles.greetingIconContainer}>
+              <View style={[styles.greetingIcon, { backgroundColor: themeColors.accent }]}>
+                <Feather
+                  name={new Date().getHours() < 12 ? 'sun' : new Date().getHours() < 17 ? 'cloud' : 'moon'}
+                  size={20}
+                  color="#ffffff"
+                />
+              </View>
+            </View>
+            <View style={styles.greetingTextContainer}>
+              <Text style={[styles.greetingText, { color: themeColors.textPrimary }]}>
+                {greeting.welcome}
+              </Text>
+              <Text style={[styles.greetingSubtitle, { color: themeColors.textSecondary }]}>
+                {greeting.subtitle}
               </Text>
             </View>
-          )}
-        </TouchableOpacity>
+          </View>
+          <TouchableOpacity
+            style={[styles.notificationBell, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}
+            onPress={() => {
+              lightTap();
+              setShowNotificationsModal(true);
+            }}
+            accessibilityLabel="Notifications"
+            accessibilityRole="button"
+          >
+            <Feather name="bell" size={22} color={themeColors.textPrimary} />
+            {unreadNotifications.length > 0 && (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationBadgeText}>
+                  {unreadNotifications.length > 9 ? '9+' : unreadNotifications.length}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* Profile Completion Reminder - shown if user skipped onboarding or has incomplete profile */}
+      {/* Profile Completion Reminder */}
       {profile && !profile.onboarding_completed && (!profile.full_name || !profile.phone_verified) && (
         <TouchableOpacity
-          style={[styles.profileReminderBanner, { backgroundColor: isDark ? 'rgba(251, 191, 36, 0.15)' : '#FEF3C7' }]}
+          style={[styles.alertBanner, { backgroundColor: isDark ? 'rgba(251, 191, 36, 0.15)' : '#FEF3C7' }]}
           onPress={() => {
             lightTap();
             navigation.navigate('ProfileTab', { screen: 'EditProfile' });
           }}
+          accessibilityRole="button"
+          accessibilityLabel="Complete your profile"
         >
-          <View style={[styles.profileReminderIcon, { backgroundColor: colors.warningLight }]}>
-            <Feather name="user" size={20} color={colors.warning} />
+          <View style={[styles.alertIcon, { backgroundColor: colors.warningLight }]}>
+            <Feather name="user" size={18} color={colors.warning} />
           </View>
-          <View style={styles.profileReminderContent}>
-            <Text style={[styles.profileReminderTitle, { color: isDark ? '#FBBF24' : '#92400E' }]}>
+          <View style={styles.alertContent}>
+            <Text style={[styles.alertTitle, { color: isDark ? '#FBBF24' : '#92400E' }]}>
               Complete Your Profile
             </Text>
-            <Text style={[styles.profileReminderText, { color: isDark ? themeColors.textMuted : '#B45309' }]}>
+            <Text style={[styles.alertText, { color: isDark ? themeColors.textMuted : '#B45309' }]}>
               {!profile.full_name ? 'Add your name' : ''}
               {!profile.full_name && !profile.phone_verified ? ' and ' : ''}
               {!profile.phone_verified ? 'verify your phone' : ''}
-              {' to build trust with sellers'}
             </Text>
           </View>
           <Feather name="chevron-right" size={20} color={isDark ? '#FBBF24' : '#92400E'} />
         </TouchableOpacity>
       )}
 
-      {/* Notifications Section */}
-      {recentNotifications.length > 0 && (
+      {/* Quick Actions - Urgent Items */}
+      {hasUrgentItems && (
         <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Notifications</Text>
-            {unreadNotifications.length > 0 && (
-              <TouchableOpacity
-                onPress={() => navigation.navigate('ProfileTab', { screen: 'Notifications' })}
-              >
-                <Text style={styles.seeAllLink}>
-                  {unreadNotifications.length} unread
+          <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Action Required</Text>
+
+          {/* Unpaid Invoices */}
+          {(buyerStats?.unpaidInvoices || 0) > 0 && (
+            <TouchableOpacity
+              style={[styles.urgentCard, { backgroundColor: '#f59e0b' }]}
+              onPress={() => navigateTo('MyInvoices')}
+              activeOpacity={0.8}
+            >
+              <View style={styles.urgentIconContainer}>
+                <Feather name="credit-card" size={24} color="#ffffff" />
+              </View>
+              <View style={styles.urgentContent}>
+                <Text style={styles.urgentTitle}>
+                  {buyerStats?.unpaidInvoices === 1 ? '1 Invoice Ready' : `${buyerStats?.unpaidInvoices} Invoices Ready`}
                 </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-          <View style={[styles.notificationsCard, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}>
-            {unreadNotifications.length > 0 ? (
-              <>
-                {unreadNotifications.slice(0, 3).map((notification, index) => {
-                  const config = getNotificationConfig(notification.type, themeColors);
-                  return (
-                    <React.Fragment key={notification.id}>
-                      <TouchableOpacity
-                        style={[
-                          styles.notificationItem,
-                          [styles.notificationItemUnread, { backgroundColor: themeColors.accentFaint }],
-                        ]}
-                        onPress={() => handleNotificationPress(notification)}
-                      >
-                        <View style={[styles.notificationIcon, { backgroundColor: config.iconBg }]}>
-                          <Feather name={config.icon} size={16} color={config.iconColor} />
-                        </View>
-                        <View style={styles.notificationContent}>
-                          <Text
-                            style={[
-                              styles.notificationTitle,
-                              { color: themeColors.textPrimary },
-                              styles.notificationTitleUnread,
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {notification.title}
-                          </Text>
-                          <Text style={[styles.notificationTime, { color: themeColors.textMuted }]}>
-                            {formatRelativeTime(notification.created_at)}
-                          </Text>
-                        </View>
-                        <View style={[styles.unreadDot, { backgroundColor: themeColors.accent }]} />
-                      </TouchableOpacity>
-                      {index < Math.min(unreadNotifications.length, 3) - 1 && <View style={[styles.divider, { backgroundColor: themeColors.borderLight }]} />}
-                    </React.Fragment>
-                  );
-                })}
-              </>
-            ) : (
-              <View style={styles.noNotificationsContainer}>
-                <Feather name="bell-off" size={24} color={themeColors.textLight} />
-                <Text style={[styles.noNotificationsText, { color: themeColors.textMuted }]}>
-                  No New Notifications
+                <Text style={styles.urgentSubtitle}>
+                  {formatCurrency(buyerStats?.pipelineValue || 0)} awaiting payment
                 </Text>
               </View>
-            )}
-            <TouchableOpacity
-              style={[styles.viewAllButton, { borderTopColor: themeColors.borderLight }]}
-              onPress={() => navigation.navigate('ProfileTab', { screen: 'Notifications' })}
-            >
-              <Text style={[styles.viewAllText, { color: themeColors.accent }]}>View All Notifications</Text>
-              <Feather name="chevron-right" size={16} color={themeColors.accent} />
+              <Feather name="arrow-right" size={20} color="#ffffff" />
             </TouchableOpacity>
-          </View>
+          )}
+
+          {/* Buyer Active Orders */}
+          {(buyerStats?.activeTransactions || 0) > 0 && (
+            <TouchableOpacity
+              style={[styles.urgentCard, { backgroundColor: themeColors.accent }]}
+              onPress={() => navigateTo('MyInvoices')}
+              activeOpacity={0.8}
+            >
+              <View style={styles.urgentIconContainer}>
+                <Feather name="truck" size={24} color="#ffffff" />
+              </View>
+              <View style={styles.urgentContent}>
+                <Text style={styles.urgentTitle}>
+                  {buyerStats?.activeTransactions === 1 ? '1 Order In Progress' : `${buyerStats?.activeTransactions} Orders In Progress`}
+                </Text>
+                <Text style={styles.urgentSubtitle}>
+                  {formatCurrency(buyerStats?.activeTransactionsAmount || 0)} in transit
+                </Text>
+              </View>
+              <Feather name="arrow-right" size={20} color="#ffffff" />
+            </TouchableOpacity>
+          )}
+
+          {/* Seller Active Sales */}
+          {(profile?.is_seller || profile?.is_admin) && (sellerStats?.activeTransactions || 0) > 0 && (
+            <TouchableOpacity
+              style={[styles.urgentCard, { backgroundColor: themeColors.success }]}
+              onPress={() => navigateTo('MySales')}
+              activeOpacity={0.8}
+            >
+              <View style={styles.urgentIconContainer}>
+                <Feather name="package" size={24} color="#ffffff" />
+              </View>
+              <View style={styles.urgentContent}>
+                <Text style={styles.urgentTitle}>
+                  {sellerStats?.activeTransactions === 1 ? '1 Active Sale' : `${sellerStats?.activeTransactions} Active Sales`}
+                </Text>
+                <Text style={styles.urgentSubtitle}>
+                  {sellerStats?.awaitingPayment ? `${sellerStats.awaitingPayment} awaiting payment` : 'In progress'}
+                </Text>
+              </View>
+              <Feather name="arrow-right" size={20} color="#ffffff" />
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
-      {/* ACTIVE TRANSACTION BANNERS - Always at top of dashboard */}
-      {/* Buyer: Orders in progress */}
-      {(buyerStats?.activeTransactions || 0) > 0 && (
-        <TouchableOpacity
-          style={[styles.pendingTransactionsBanner, { backgroundColor: themeColors.accent }]}
-          onPress={() => navigateTo('MyInvoices')}
-          activeOpacity={0.8}
-        >
-          <View style={styles.pendingTransactionsIconContainer}>
-            <Feather name="truck" size={32} color="#ffffff" />
-          </View>
-          <View style={styles.pendingTransactionsContent}>
-            <Text style={styles.pendingTransactionsTitle}>
-              {buyerStats?.activeTransactions === 1 ? 'Order In Progress' : `${buyerStats?.activeTransactions} Orders In Progress`}
-            </Text>
-            <Text style={styles.pendingTransactionsSubtitle}>
-              Tap to track status • {formatCurrency(buyerStats?.activeTransactionsAmount || 0)}
-            </Text>
-          </View>
-          <View style={styles.pendingTransactionsArrow}>
-            <Feather name="arrow-right" size={24} color="#ffffff" />
-          </View>
-        </TouchableOpacity>
-      )}
+      {/* Buying Activity Section */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Buying Activity</Text>
 
-      {/* Seller: Active sales transactions */}
-      {(profile?.is_seller || profile?.is_admin) && (sellerStats?.activeTransactions || 0) > 0 && (
-        <TouchableOpacity
-          style={[styles.pendingTransactionsBanner, { backgroundColor: themeColors.success }]}
-          onPress={() => navigateTo('MySales')}
-          activeOpacity={0.8}
-        >
-          <View style={styles.pendingTransactionsIconContainer}>
-            <Feather name="clock" size={32} color="#ffffff" />
-          </View>
-          <View style={styles.pendingTransactionsContent}>
-            <Text style={styles.pendingTransactionsTitle}>
-              {sellerStats?.activeTransactions === 1 ? 'Active Sale' : `${sellerStats?.activeTransactions} Active Sales`}
-            </Text>
-            <Text style={styles.pendingTransactionsSubtitle}>
-              {sellerStats?.awaitingPayment
-                ? `${sellerStats.awaitingPayment} awaiting payment`
-                : 'In progress'} • {formatCurrency(sellerStats?.activeTransactionsAmount || 0)}
-            </Text>
-          </View>
-          <View style={styles.pendingTransactionsArrow}>
-            <Feather name="arrow-right" size={24} color="#ffffff" />
-          </View>
-        </TouchableOpacity>
-      )}
-
-      {/* Buyer: Unpaid invoices */}
-      {(buyerStats?.unpaidInvoices || 0) > 0 && (
-        <TouchableOpacity
-          style={[styles.acceptedOffersBanner, { backgroundColor: '#f59e0b' }]}
-          onPress={() => navigateTo('MyInvoices')}
-          activeOpacity={0.8}
-        >
-          <View style={styles.acceptedOffersIconContainer}>
-            <Feather name="credit-card" size={32} color="#ffffff" />
-          </View>
-          <View style={styles.acceptedOffersContent}>
-            <Text style={styles.acceptedOffersTitle}>
-              {buyerStats?.unpaidInvoices === 1 ? 'Invoice Ready!' : `${buyerStats?.unpaidInvoices} Invoices Ready!`}
-            </Text>
-            <Text style={styles.acceptedOffersSubtitle}>
-              Tap here to view and complete payment • {formatCurrency(buyerStats?.pipelineValue || 0)}
-            </Text>
-          </View>
-          <View style={styles.acceptedOffersArrow}>
-            <Feather name="arrow-right" size={24} color="#ffffff" />
-          </View>
-        </TouchableOpacity>
-      )}
-
-      {/*
-        Dashboard section ordering:
-        - Admin accounts: Seller first, then Buyer
-        - All other accounts: Buyer first, then Seller
-      */}
-
-      {/* BUYER SECTION - Show first for all non-admin accounts */}
-      {!profile?.is_admin && (
-        <>
-          {/* Buyer Stats */}
-          <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Buying Activity</Text>
-            <View style={styles.statsGrid}>
-              <StatCard
-                icon="trending-up"
-                iconColor={themeColors.accent}
-                iconBg={themeColors.accentFaint}
-                value={buyerStats?.activeBids || 0}
-                label="Active Bids"
-                onPress={() => navigateTo('MyBids')}
-              />
-              <StatCard
-                icon="award"
-                iconColor={themeColors.success}
-                iconBg={themeColors.successLight}
-                value={buyerStats?.winningBids || 0}
-                label="Winning"
-                onPress={() => navigateTo('MyBids')}
-              />
-              <StatCard
-                icon="clock"
-                iconColor={themeColors.warning}
-                iconBg={themeColors.warningLight}
-                value={buyerStats?.pendingOffers || 0}
-                label="Pending Offers"
-                onPress={() => navigateTo('MyOffers')}
-              />
+        {/* Stats Row */}
+        <View style={styles.statsRow}>
+          <TouchableOpacity
+            style={[styles.statCard, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}
+            onPress={() => navigateTo('MyBids')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.statIconSmall, { backgroundColor: themeColors.accentFaint }]}>
+              <Feather name="trending-up" size={16} color={themeColors.accent} />
             </View>
-          </View>
+            <Text style={[styles.statValue, { color: themeColors.textPrimary }]}>
+              {buyerStats?.activeBids || 0}
+            </Text>
+            <Text style={[styles.statLabel, { color: themeColors.textMuted }]}>Active Bids</Text>
+          </TouchableOpacity>
 
-          {/* Buyer Actions */}
-          <View style={styles.section}>
-            <View style={[styles.menuCard, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}>
-              <ActionCard
-                icon="trending-up"
-                title="My Bids"
-                subtitle={buyerStats?.activeBids ? `${buyerStats.activeBids} active` : 'View all your bids'}
-                badge={buyerStats?.activeBids}
-                onPress={() => navigateTo('MyBids')}
-              />
-              <View style={styles.divider} />
-              <ActionCard
-                icon="message-square"
-                title="My Offers"
-                subtitle={buyerStats?.pendingOffers ? `${buyerStats.pendingOffers} pending` : 'View all your offers'}
-                badge={buyerStats?.pendingOffers}
-                onPress={() => navigateTo('MyOffers')}
-              />
-              <View style={styles.divider} />
-              <ActionCard
-                icon="shopping-bag"
-                title="Purchases"
-                subtitle={buyerStats?.unpaidInvoices ? `${buyerStats.unpaidInvoices} awaiting payment` : 'View your purchases'}
-                badge={buyerStats?.unpaidInvoices}
-                badgeColor={themeColors.error}
-                onPress={() => navigateTo('MyInvoices')}
-              />
+          <TouchableOpacity
+            style={[styles.statCard, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}
+            onPress={() => navigateTo('MyBids')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.statIconSmall, { backgroundColor: themeColors.successLight }]}>
+              <Feather name="award" size={16} color={themeColors.success} />
             </View>
-          </View>
+            <Text style={[styles.statValue, { color: themeColors.textPrimary }]}>
+              {buyerStats?.winningBids || 0}
+            </Text>
+            <Text style={[styles.statLabel, { color: themeColors.textMuted }]}>Winning</Text>
+          </TouchableOpacity>
 
-          {/* Become a Seller CTA (hide for sellers) */}
-          {!profile?.is_seller && (
-            <View style={styles.section}>
-              <TouchableOpacity
-                style={[styles.sellerCta, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}
-                onPress={() => {
-                  lightTap();
-                  navigation.navigate('ProfileTab', { screen: 'EditProfile' });
-                }}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.sellerCtaIcon, { backgroundColor: themeColors.accentFaint }]}>
-                  <Feather name="package" size={28} color={themeColors.accent} />
-                </View>
-                <View style={styles.sellerCtaContent}>
-                  <Text style={[styles.sellerCtaTitle, { color: themeColors.textPrimary }]}>Start Selling</Text>
-                  <Text style={[styles.sellerCtaSubtitle, { color: themeColors.textMuted }]}>
-                    List your equipment and reach thousands of buyers
-                  </Text>
-                </View>
-                <View style={[styles.sellerCtaButton, { backgroundColor: themeColors.accent }]}>
-                  <Text style={styles.sellerCtaButtonText}>Get Started</Text>
-                  <Feather name="arrow-right" size={16} color="#ffffff" />
-                </View>
-              </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.statCard, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}
+            onPress={() => navigateTo('MyOffers')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.statIconSmall, { backgroundColor: themeColors.warningLight }]}>
+              <Feather name="send" size={16} color={themeColors.warning} />
             </View>
-          )}
-        </>
-      )}
+            <Text style={[styles.statValue, { color: themeColors.textPrimary }]}>
+              {buyerStats?.pendingOffers || 0}
+            </Text>
+            <Text style={[styles.statLabel, { color: themeColors.textMuted }]}>Open Offers</Text>
+          </TouchableOpacity>
+        </View>
 
-      {/* SELLER SECTION (if seller or admin) */}
+        {/* Quick Links */}
+        <View style={[styles.linksCard, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}>
+          <TouchableOpacity
+            style={styles.linkRow}
+            onPress={() => navigateTo('MyBids')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.linkIcon, { backgroundColor: themeColors.accentFaint }]}>
+              <Feather name="trending-up" size={18} color={themeColors.accent} />
+            </View>
+            <Text style={[styles.linkText, { color: themeColors.textPrimary }]}>My Bids</Text>
+            {(buyerStats?.activeBids || 0) > 0 && (
+              <View style={[styles.linkBadge, { backgroundColor: themeColors.accent }]}>
+                <Text style={styles.linkBadgeText}>{buyerStats?.activeBids}</Text>
+              </View>
+            )}
+            <Feather name="chevron-right" size={18} color={themeColors.textLight} style={styles.linkArrow} />
+          </TouchableOpacity>
+
+          <View style={[styles.linkDivider, { backgroundColor: themeColors.borderLight }]} />
+
+          <TouchableOpacity
+            style={styles.linkRow}
+            onPress={() => navigateTo('MyOffers')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.linkIcon, { backgroundColor: themeColors.warningLight }]}>
+              <Feather name="message-square" size={18} color={themeColors.warning} />
+            </View>
+            <Text style={[styles.linkText, { color: themeColors.textPrimary }]}>My Offers</Text>
+            {(buyerStats?.pendingOffers || 0) > 0 && (
+              <View style={[styles.linkBadge, { backgroundColor: themeColors.warning }]}>
+                <Text style={styles.linkBadgeText}>{buyerStats?.pendingOffers}</Text>
+              </View>
+            )}
+            <Feather name="chevron-right" size={18} color={themeColors.textLight} style={styles.linkArrow} />
+          </TouchableOpacity>
+
+          <View style={[styles.linkDivider, { backgroundColor: themeColors.borderLight }]} />
+
+          <TouchableOpacity
+            style={styles.linkRow}
+            onPress={() => navigateTo('MyInvoices')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.linkIcon, { backgroundColor: themeColors.successLight }]}>
+              <Feather name="shopping-bag" size={18} color={themeColors.success} />
+            </View>
+            <Text style={[styles.linkText, { color: themeColors.textPrimary }]}>Purchases</Text>
+            {(buyerStats?.totalPurchases || 0) > 0 && (
+              <Text style={[styles.linkSubtext, { color: themeColors.textMuted }]}>
+                {buyerStats?.totalPurchases} completed
+              </Text>
+            )}
+            <Feather name="chevron-right" size={18} color={themeColors.textLight} style={styles.linkArrow} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Selling Activity Section */}
       {(profile?.is_seller || profile?.is_admin) && (
-        <>
-          <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Selling Activity</Text>
-            <View style={styles.statsGrid}>
-              <StatCard
-                icon="package"
-                iconColor={themeColors.accent}
-                iconBg={themeColors.accentFaint}
-                value={sellerStats?.activeListings || 0}
-                label="Active Listings"
-                onPress={() => navigateTo('MyListings')}
-              />
-              <StatCard
-                icon="inbox"
-                iconColor={themeColors.warning}
-                iconBg={themeColors.warningLight}
-                value={sellerStats?.pendingOffers || 0}
-                label="Pending Offers"
-                onPress={() => {
-                  lightTap();
-                  navigation.navigate('SellerOffers', { viewMode: 'received' });
-                }}
-              />
-              <StatCard
-                icon="dollar-sign"
-                iconColor={themeColors.success}
-                iconBg={themeColors.successLight}
-                value={sellerStats?.totalSales || 0}
-                label="Total Sales"
-                onPress={() => navigateTo('MySales')}
-              />
-            </View>
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Selling Activity</Text>
+
+          {/* Stats Row */}
+          <View style={styles.statsRow}>
+            <TouchableOpacity
+              style={[styles.statCard, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}
+              onPress={() => navigateTo('MyListings')}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.statIconSmall, { backgroundColor: themeColors.accentFaint }]}>
+                <Feather name="box" size={16} color={themeColors.accent} />
+              </View>
+              <Text style={[styles.statValue, { color: themeColors.textPrimary }]}>
+                {sellerStats?.activeListings || 0}
+              </Text>
+              <Text style={[styles.statLabel, { color: themeColors.textMuted }]}>Listings</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.statCard, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}
+              onPress={() => navigation.navigate('SellerOffers', { viewMode: 'received' })}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.statIconSmall, { backgroundColor: themeColors.warningLight }]}>
+                <Feather name="inbox" size={16} color={themeColors.warning} />
+              </View>
+              <Text style={[styles.statValue, { color: themeColors.textPrimary }]}>
+                {sellerStats?.pendingOffers || 0}
+              </Text>
+              <Text style={[styles.statLabel, { color: themeColors.textMuted }]}>Offers</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.statCard, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}
+              onPress={() => navigateTo('MySales')}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.statIconSmall, { backgroundColor: themeColors.successLight }]}>
+                <Feather name="dollar-sign" size={16} color={themeColors.success} />
+              </View>
+              <Text style={[styles.statValue, { color: themeColors.textPrimary }]}>
+                {sellerStats?.totalSales || 0}
+              </Text>
+              <Text style={[styles.statLabel, { color: themeColors.textMuted }]}>Sales</Text>
+            </TouchableOpacity>
           </View>
 
-          {/* Seller Revenue Card */}
-          <View style={styles.revenueCard}>
+          {/* Revenue Summary */}
+          <View style={[styles.revenueCard, { backgroundColor: themeColors.accent }]}>
             <View style={styles.revenueRow}>
               <View>
                 <Text style={styles.revenueLabel}>Total Revenue</Text>
                 <Text style={styles.revenueValue}>{formatCurrency(sellerStats?.totalRevenue || 0)}</Text>
               </View>
               <View style={styles.revenueRight}>
-                <Text style={styles.pendingLabel}>Pending Payouts</Text>
+                <Text style={styles.revenueLabel}>Pending</Text>
                 <Text style={styles.pendingValue}>{formatCurrency(sellerStats?.pendingPayouts || 0)}</Text>
               </View>
             </View>
           </View>
 
-          {/* Seller Actions */}
-          <View style={styles.section}>
-            <View style={[styles.menuCard, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}>
-              <ActionCard
-                icon="package"
-                title="My Listings"
-                subtitle="Manage your listings"
-                onPress={() => navigateTo('MyListings')}
-              />
-              <View style={[styles.divider, { borderBottomColor: themeColors.borderLight }]} />
-              <ActionCard
-                icon="dollar-sign"
-                title="Sales"
-                subtitle="View your sales history"
-                onPress={() => navigateTo('MySales')}
-              />
-              <View style={[styles.divider, { borderBottomColor: themeColors.borderLight }]} />
-              <ActionCard
-                icon="bar-chart-2"
-                title="Seller Analytics"
-                subtitle="Views, watchers, and performance"
-                onPress={() => navigation.navigate('ProfileTab', { screen: 'SellerDashboard' })}
-              />
-            </View>
+          {/* Quick Links */}
+          <View style={[styles.linksCard, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}>
+            <TouchableOpacity
+              style={styles.linkRow}
+              onPress={() => navigateTo('MyListings')}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.linkIcon, { backgroundColor: themeColors.accentFaint }]}>
+                <Feather name="package" size={18} color={themeColors.accent} />
+              </View>
+              <Text style={[styles.linkText, { color: themeColors.textPrimary }]}>My Listings</Text>
+              <Feather name="chevron-right" size={18} color={themeColors.textLight} style={styles.linkArrow} />
+            </TouchableOpacity>
+
+            <View style={[styles.linkDivider, { backgroundColor: themeColors.borderLight }]} />
+
+            <TouchableOpacity
+              style={styles.linkRow}
+              onPress={() => navigation.navigate('SellerOffers', { viewMode: 'received' })}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.linkIcon, { backgroundColor: themeColors.warningLight }]}>
+                <Feather name="inbox" size={18} color={themeColors.warning} />
+              </View>
+              <Text style={[styles.linkText, { color: themeColors.textPrimary }]}>Received Offers</Text>
+              {(sellerStats?.pendingOffers || 0) > 0 && (
+                <View style={[styles.linkBadge, { backgroundColor: themeColors.warning }]}>
+                  <Text style={styles.linkBadgeText}>{sellerStats?.pendingOffers}</Text>
+                </View>
+              )}
+              <Feather name="chevron-right" size={18} color={themeColors.textLight} style={styles.linkArrow} />
+            </TouchableOpacity>
+
+            <View style={[styles.linkDivider, { backgroundColor: themeColors.borderLight }]} />
+
+            <TouchableOpacity
+              style={styles.linkRow}
+              onPress={() => navigateTo('MySales')}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.linkIcon, { backgroundColor: themeColors.successLight }]}>
+                <Feather name="dollar-sign" size={18} color={themeColors.success} />
+              </View>
+              <Text style={[styles.linkText, { color: themeColors.textPrimary }]}>Sales History</Text>
+              <Feather name="chevron-right" size={18} color={themeColors.textLight} style={styles.linkArrow} />
+            </TouchableOpacity>
+
+            <View style={[styles.linkDivider, { backgroundColor: themeColors.borderLight }]} />
+
+            <TouchableOpacity
+              style={styles.linkRow}
+              onPress={() => navigation.navigate('ProfileTab', { screen: 'SellerDashboard' })}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.linkIcon, { backgroundColor: themeColors.accentFaint }]}>
+                <Feather name="bar-chart-2" size={18} color={themeColors.accent} />
+              </View>
+              <Text style={[styles.linkText, { color: themeColors.textPrimary }]}>Seller Analytics</Text>
+              <Text style={[styles.linkSubtext, { color: themeColors.textMuted }]}>
+                {sellerStats?.totalViews || 0} views
+              </Text>
+              <Feather name="chevron-right" size={18} color={themeColors.textLight} style={styles.linkArrow} />
+            </TouchableOpacity>
           </View>
 
           {/* Create Listing CTA */}
           <TouchableOpacity
-            style={[styles.createListingButton, { backgroundColor: themeColors.accent }]}
+            style={[styles.createButton, { backgroundColor: themeColors.accent }]}
             onPress={() => navigateTo('CreateListing')}
             activeOpacity={0.8}
           >
             <Feather name="plus" size={20} color="#ffffff" />
-            <Text style={styles.createListingText}>Create New Listing</Text>
+            <Text style={styles.createButtonText}>Create New Listing</Text>
           </TouchableOpacity>
-        </>
+        </View>
+      )}
+
+      {/* Become a Seller CTA */}
+      {!profile?.is_seller && !profile?.is_admin && (
+        <View style={styles.section}>
+          <TouchableOpacity
+            style={[styles.sellerCta, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}
+            onPress={() => {
+              lightTap();
+              navigation.navigate('ProfileTab', { screen: 'EditProfile' });
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.sellerCtaIcon, { backgroundColor: themeColors.accentFaint }]}>
+              <Feather name="package" size={24} color={themeColors.accent} />
+            </View>
+            <View style={styles.sellerCtaContent}>
+              <Text style={[styles.sellerCtaTitle, { color: themeColors.textPrimary }]}>Start Selling</Text>
+              <Text style={[styles.sellerCtaSubtitle, { color: themeColors.textMuted }]}>
+                List your equipment and reach thousands of buyers
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={20} color={themeColors.textLight} />
+          </TouchableOpacity>
+        </View>
       )}
 
       {/* Admin Section */}
       {profile?.is_admin && (
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Administration</Text>
-          <View style={[styles.menuCard, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}>
-            <ActionCard
-              icon="shield"
-              title="Admin Panel"
-              subtitle="Manage users, listings, and platform settings"
-              onPress={() => navigation.navigate('ProfileTab', { screen: 'AdminPanel' })}
-            />
-          </View>
-        </View>
-      )}
-
-      {/* Recent Activity */}
-      {(recentActivity?.length || 0) > 0 && (
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: themeColors.textMuted }]}>Recent Activity</Text>
-          <View style={[styles.menuCard, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}>
-            {recentActivity?.map((activity, index) => {
-              // Compute colors dynamically based on theme
-              let iconColor: string;
-              let iconBg: string;
-              if (activity.type === 'bid') {
-                iconColor = themeColors.accent;
-                iconBg = themeColors.accentFaint;
-              } else if (activity.type === 'offer') {
-                iconColor = activity.isReceived ? themeColors.success : themeColors.warning;
-                iconBg = activity.isReceived ? themeColors.successLight : themeColors.warningLight;
-              } else {
-                iconColor = themeColors.accent;
-                iconBg = themeColors.accentFaint;
-              }
-
-              return (
-              <React.Fragment key={activity.id}>
-                <View style={styles.activityItem}>
-                  <View style={[styles.activityIcon, { backgroundColor: iconBg }]}>
-                    <Feather name={activity.icon} size={16} color={iconColor} />
-                  </View>
-                  <View style={styles.activityContent}>
-                    <Text style={[styles.activityTitle, { color: themeColors.textPrimary }]}>{activity.title}</Text>
-                    <Text style={[styles.activitySubtitle, { color: themeColors.textMuted }]} numberOfLines={1}>{activity.subtitle}</Text>
-                  </View>
-                  {activity.amount && (
-                    <Text style={[styles.activityAmount, { color: themeColors.textPrimary }]}>{formatCurrency(activity.amount)}</Text>
-                  )}
-                </View>
-                {index < (recentActivity?.length || 0) - 1 && <View style={[styles.divider, { borderBottomColor: themeColors.borderLight }]} />}
-              </React.Fragment>
-              );
-            })}
-          </View>
+          <TouchableOpacity
+            style={[styles.adminCard, { backgroundColor: isDark ? themeColors.sand : '#ffffff' }]}
+            onPress={() => navigation.navigate('ProfileTab', { screen: 'AdminPanel' })}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.adminIcon, { backgroundColor: themeColors.accentFaint }]}>
+              <Feather name="shield" size={20} color={themeColors.accent} />
+            </View>
+            <View style={styles.adminContent}>
+              <Text style={[styles.adminTitle, { color: themeColors.textPrimary }]}>Admin Panel</Text>
+              <Text style={[styles.adminSubtitle, { color: themeColors.textMuted }]}>
+                Manage users, listings, and settings
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={20} color={themeColors.textLight} />
+          </TouchableOpacity>
         </View>
       )}
 
@@ -973,18 +923,32 @@ export default function DashboardScreen() {
             style={[styles.modalContent, { backgroundColor: isDark ? themeColors.background : '#ffffff', paddingBottom: insets.bottom }]}
             onPress={(e) => e.stopPropagation()}
           >
-            {/* Modal Header */}
             <View style={[styles.modalHeader, { borderBottomColor: themeColors.borderLight }]}>
               <Text style={[styles.modalTitle, { color: themeColors.textPrimary }]}>Notifications</Text>
-              <TouchableOpacity
-                style={[styles.modalCloseButton, { backgroundColor: themeColors.sand }]}
-                onPress={() => setShowNotificationsModal(false)}
-              >
-                <Feather name="x" size={20} color={themeColors.textPrimary} />
-              </TouchableOpacity>
+              <View style={styles.modalHeaderActions}>
+                {unreadNotifications.length > 0 && (
+                  <TouchableOpacity
+                    style={styles.markAllReadButton}
+                    onPress={() => {
+                      lightTap();
+                      markAllReadMutation.mutate();
+                    }}
+                    disabled={markAllReadMutation.isPending}
+                  >
+                    <Text style={[styles.markAllReadText, { color: themeColors.accent }]}>
+                      {markAllReadMutation.isPending ? 'Marking...' : 'Mark All Read'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={[styles.modalCloseButton, { backgroundColor: themeColors.sand }]}
+                  onPress={() => setShowNotificationsModal(false)}
+                >
+                  <Feather name="x" size={20} color={themeColors.textPrimary} />
+                </TouchableOpacity>
+              </View>
             </View>
 
-            {/* Notifications List */}
             {notifications && notifications.length > 0 ? (
               <FlatList
                 data={notifications}
@@ -1060,41 +1024,57 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.xs,
   },
-  headerLeft: {
+  greetingCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: spacing.md,
+    borderRadius: borderRadius.xl,
+  },
+  greetingContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
     flex: 1,
   },
-  welcomeText: {
-    fontSize: fontSize.base,
-    color: colors.textMuted,
+  greetingIconContainer: {
+    marginRight: spacing.md,
   },
-  userName: {
-    fontSize: fontSize['2xl'],
+  greetingIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  greetingTextContainer: {
+    flex: 1,
+  },
+  greetingText: {
+    fontSize: fontSize.base,
     fontWeight: fontWeight.bold,
-    color: colors.textPrimary,
+  },
+  greetingSubtitle: {
+    fontSize: fontSize.sm,
+    marginTop: 2,
   },
   notificationBell: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.white,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
     ...shadows.sm,
   },
   notificationBadge: {
     position: 'absolute',
-    top: 6,
-    right: 6,
+    top: 4,
+    right: 4,
     minWidth: 18,
     height: 18,
     borderRadius: 9,
@@ -1108,251 +1088,158 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.bold,
     color: colors.white,
   },
-  profileReminderBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.sm,
-    padding: spacing.md,
-    borderRadius: borderRadius.lg,
-    gap: spacing.md,
-  },
-  profileReminderIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  profileReminderContent: {
-    flex: 1,
-  },
-  profileReminderTitle: {
-    fontSize: fontSize.base,
-    fontWeight: fontWeight.semibold,
-    marginBottom: 2,
-  },
-  profileReminderText: {
-    fontSize: fontSize.sm,
-  },
   section: {
     marginTop: spacing.xl,
     paddingHorizontal: spacing.lg,
   },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
   sectionTitle: {
     fontSize: fontSize.xs,
     fontWeight: fontWeight.semibold,
-    color: colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: spacing.md,
     marginLeft: spacing.xs,
   },
-  seeAllLink: {
-    fontSize: fontSize.xs,
-    fontWeight: fontWeight.medium,
-    color: colors.accent,
-  },
-
-  // Notifications
-  notificationsCard: {
-    backgroundColor: colors.white,
-    borderRadius: borderRadius.xl,
-    overflow: 'hidden',
-    ...shadows.sm,
-  },
-  noNotificationsContainer: {
+  // Alert Banner
+  alertBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.xl,
-    paddingHorizontal: spacing.lg,
-  },
-  noNotificationsText: {
-    fontSize: fontSize.base,
-    fontWeight: fontWeight.medium,
-  },
-  notificationItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-  },
-  notificationItemUnread: {
-    backgroundColor: colors.accentFaint,
-  },
-  notificationIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: borderRadius.md,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: spacing.md,
-  },
-  notificationContent: {
-    flex: 1,
-  },
-  notificationTitle: {
-    fontSize: fontSize.sm,
-    color: colors.textPrimary,
-  },
-  notificationTitleUnread: {
-    fontWeight: fontWeight.semibold,
-  },
-  notificationTime: {
-    fontSize: fontSize.xs,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.accent,
-    marginLeft: spacing.sm,
-  },
-  viewAllButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: colors.borderLight,
-    gap: spacing.xs,
-  },
-  viewAllText: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.medium,
-    color: colors.accent,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: colors.white,
-    borderRadius: borderRadius.xl,
-    padding: spacing.lg,
-    alignItems: 'center',
-    ...shadows.sm,
-  },
-  statIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: borderRadius.lg,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: spacing.sm,
-  },
-  statValue: {
-    fontSize: fontSize['2xl'],
-    fontWeight: fontWeight.bold,
-    color: colors.textPrimary,
-  },
-  statLabel: {
-    fontSize: fontSize.xs,
-    color: colors.textMuted,
-    marginTop: spacing.xs,
-    textAlign: 'center',
-  },
-  alertCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.errorLight,
     marginHorizontal: spacing.lg,
-    marginTop: spacing.lg,
-    padding: spacing.lg,
-    borderRadius: borderRadius.xl,
-    borderWidth: 1,
-    borderColor: colors.error,
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: borderRadius.lg,
+    gap: spacing.md,
   },
-  alertIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.white,
+  alertIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: spacing.md,
   },
   alertContent: {
     flex: 1,
   },
   alertTitle: {
-    fontSize: fontSize.base,
-    fontWeight: fontWeight.semibold,
-    color: colors.error,
-  },
-  alertSubtitle: {
     fontSize: fontSize.sm,
-    color: colors.error,
-    opacity: 0.8,
-    marginTop: spacing.xs,
+    fontWeight: fontWeight.semibold,
   },
-  menuCard: {
-    backgroundColor: colors.white,
-    borderRadius: borderRadius.xl,
-    ...shadows.sm,
+  alertText: {
+    fontSize: fontSize.xs,
+    marginTop: 2,
   },
-  actionCard: {
+  // Urgent Cards
+  urgentCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.lg,
-    paddingHorizontal: spacing.lg,
+    padding: spacing.md,
+    borderRadius: borderRadius.lg,
+    marginBottom: spacing.sm,
   },
-  actionIconContainer: {
+  urgentIconContainer: {
     width: 40,
     height: 40,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.accentFaint,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: spacing.md,
   },
-  actionContent: {
+  urgentContent: {
     flex: 1,
   },
-  actionTitle: {
+  urgentTitle: {
     fontSize: fontSize.base,
     fontWeight: fontWeight.semibold,
-    color: colors.textPrimary,
+    color: '#ffffff',
   },
-  actionSubtitle: {
-    fontSize: fontSize.sm,
-    color: colors.textMuted,
-    marginTop: spacing.xs,
+  urgentSubtitle: {
+    fontSize: fontSize.xs,
+    color: 'rgba(255, 255, 255, 0.85)',
+    marginTop: 2,
   },
-  badge: {
-    backgroundColor: colors.accent,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.full,
-    minWidth: 28,
+  // Stats Row
+  statsRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  statCard: {
+    flex: 1,
+    padding: spacing.md,
+    borderRadius: borderRadius.lg,
     alignItems: 'center',
+    ...shadows.sm,
   },
-  badgeText: {
-    color: colors.white,
+  statIconSmall: {
+    width: 32,
+    height: 32,
+    borderRadius: borderRadius.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  statValue: {
+    fontSize: fontSize.xl,
+    fontWeight: fontWeight.bold,
+  },
+  statLabel: {
+    fontSize: fontSize.xs,
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  // Links Card
+  linksCard: {
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+    ...shadows.sm,
+  },
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+  },
+  linkIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.md,
+  },
+  linkText: {
+    flex: 1,
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.medium,
+  },
+  linkSubtext: {
+    fontSize: fontSize.xs,
+    marginRight: spacing.sm,
+  },
+  linkBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: borderRadius.full,
+    marginRight: spacing.sm,
+  },
+  linkBadgeText: {
     fontSize: fontSize.xs,
     fontWeight: fontWeight.semibold,
+    color: '#ffffff',
   },
-  divider: {
+  linkArrow: {
+    marginLeft: 'auto',
+  },
+  linkDivider: {
     height: 1,
-    backgroundColor: colors.borderLight,
-    marginLeft: spacing.lg + 40 + spacing.md,
+    marginLeft: spacing.md + 36 + spacing.md,
   },
+  // Revenue Card
   revenueCard: {
-    backgroundColor: colors.primary,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.lg,
-    padding: spacing.xl,
-    borderRadius: borderRadius.xl,
+    padding: spacing.lg,
+    borderRadius: borderRadius.lg,
+    marginBottom: spacing.md,
   },
   revenueRow: {
     flexDirection: 'row',
@@ -1360,122 +1247,108 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   revenueLabel: {
-    fontSize: fontSize.sm,
-    color: colors.textLight,
+    fontSize: fontSize.xs,
+    color: 'rgba(255, 255, 255, 0.75)',
   },
   revenueValue: {
-    fontSize: fontSize['2xl'],
+    fontSize: fontSize.xl,
     fontWeight: fontWeight.bold,
-    color: colors.white,
-    marginTop: spacing.xs,
+    color: '#ffffff',
+    marginTop: 2,
   },
   revenueRight: {
     alignItems: 'flex-end',
   },
-  pendingLabel: {
-    fontSize: fontSize.sm,
-    color: colors.textLight,
-  },
   pendingValue: {
-    fontSize: fontSize.lg,
+    fontSize: fontSize.base,
     fontWeight: fontWeight.semibold,
-    color: colors.accentMuted,
-    marginTop: spacing.xs,
+    color: 'rgba(255, 255, 255, 0.9)',
+    marginTop: 2,
   },
-  createListingButton: {
+  // Create Button
+  createButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.accent,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.xl,
-    padding: spacing.lg,
-    borderRadius: borderRadius.xl,
+    padding: spacing.md,
+    borderRadius: borderRadius.lg,
+    marginTop: spacing.md,
     gap: spacing.sm,
-    ...shadows.md,
   },
-  createListingText: {
+  createButtonText: {
     fontSize: fontSize.base,
     fontWeight: fontWeight.semibold,
-    color: colors.white,
+    color: '#ffffff',
   },
+  // Seller CTA
   sellerCta: {
-    backgroundColor: colors.white,
-    borderRadius: borderRadius.xl,
+    flexDirection: 'row',
+    alignItems: 'center',
     padding: spacing.lg,
+    borderRadius: borderRadius.lg,
     ...shadows.sm,
   },
   sellerCtaIcon: {
-    width: 56,
-    height: 56,
+    width: 48,
+    height: 48,
     borderRadius: borderRadius.lg,
-    backgroundColor: colors.accentFaint,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: spacing.md,
+    marginRight: spacing.md,
   },
   sellerCtaContent: {
-    marginBottom: spacing.lg,
+    flex: 1,
   },
   sellerCtaTitle: {
-    fontSize: fontSize.lg,
+    fontSize: fontSize.base,
     fontWeight: fontWeight.semibold,
-    color: colors.textPrimary,
-    marginBottom: spacing.xs,
   },
   sellerCtaSubtitle: {
     fontSize: fontSize.sm,
-    color: colors.textMuted,
-    lineHeight: 20,
+    marginTop: 2,
   },
-  sellerCtaButton: {
+  // Admin Card
+  adminCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.accent,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.xl,
+    padding: spacing.lg,
     borderRadius: borderRadius.lg,
-    alignSelf: 'flex-start',
+    ...shadows.sm,
   },
-  sellerCtaButtonText: {
-    color: colors.white,
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.semibold,
-  },
-  activityItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-  },
-  activityIcon: {
-    width: 32,
-    height: 32,
+  adminIcon: {
+    width: 40,
+    height: 40,
     borderRadius: borderRadius.md,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: spacing.md,
   },
-  activityContent: {
+  adminContent: {
     flex: 1,
   },
-  activityTitle: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.medium,
-    color: colors.textPrimary,
+  adminTitle: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.semibold,
   },
-  activitySubtitle: {
-    fontSize: fontSize.xs,
-    color: colors.textMuted,
+  adminSubtitle: {
+    fontSize: fontSize.sm,
     marginTop: 2,
   },
-  activityAmount: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.semibold,
-    color: colors.textPrimary,
+  // Notification Icon
+  notificationIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: borderRadius.md,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  // Modal styles
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginLeft: spacing.sm,
+  },
+  // Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -1496,8 +1369,21 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   modalTitle: {
-    fontSize: fontSize.xl,
+    fontSize: fontSize.lg,
     fontWeight: fontWeight.bold,
+  },
+  modalHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  markAllReadButton: {
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+  },
+  markAllReadText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.medium,
   },
   modalCloseButton: {
     width: 32,
@@ -1512,7 +1398,7 @@ const styles = StyleSheet.create({
   modalNotificationItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingVertical: spacing.lg,
+    paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
   },
   modalNotificationContent: {
@@ -1520,12 +1406,12 @@ const styles = StyleSheet.create({
     marginLeft: spacing.md,
   },
   modalNotificationTitle: {
-    fontSize: fontSize.base,
+    fontSize: fontSize.sm,
   },
   modalNotificationBody: {
-    fontSize: fontSize.sm,
+    fontSize: fontSize.xs,
     marginTop: spacing.xs,
-    lineHeight: 20,
+    lineHeight: 18,
   },
   modalNotificationTime: {
     fontSize: fontSize.xs,
@@ -1538,97 +1424,17 @@ const styles = StyleSheet.create({
   emptyNotifications: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing['5xl'],
+    paddingVertical: spacing['4xl'],
     paddingHorizontal: spacing['2xl'],
   },
   emptyNotificationsTitle: {
-    fontSize: fontSize.lg,
+    fontSize: fontSize.base,
     fontWeight: fontWeight.semibold,
-    marginTop: spacing.lg,
+    marginTop: spacing.md,
   },
   emptyNotificationsText: {
-    fontSize: fontSize.base,
-    marginTop: spacing.sm,
+    fontSize: fontSize.sm,
+    marginTop: spacing.xs,
     textAlign: 'center',
-  },
-  // Accepted Offers Banner - prominent CTA
-  acceptedOffersBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.xl,
-    padding: spacing.lg,
-    borderRadius: borderRadius.xl,
-    ...shadows.lg,
-  },
-  acceptedOffersIconContainer: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: spacing.lg,
-  },
-  acceptedOffersContent: {
-    flex: 1,
-  },
-  acceptedOffersTitle: {
-    fontSize: fontSize.xl,
-    fontWeight: fontWeight.bold,
-    color: '#ffffff',
-  },
-  acceptedOffersSubtitle: {
-    fontSize: fontSize.sm,
-    color: 'rgba(255, 255, 255, 0.9)',
-    marginTop: spacing.xs,
-  },
-  acceptedOffersArrow: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  // Pending Transactions Banner - for sellers
-  pendingTransactionsBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.xl,
-    padding: spacing.lg,
-    borderRadius: borderRadius.xl,
-    ...shadows.lg,
-  },
-  pendingTransactionsIconContainer: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: spacing.lg,
-  },
-  pendingTransactionsContent: {
-    flex: 1,
-  },
-  pendingTransactionsTitle: {
-    fontSize: fontSize.xl,
-    fontWeight: fontWeight.bold,
-    color: '#ffffff',
-  },
-  pendingTransactionsSubtitle: {
-    fontSize: fontSize.sm,
-    color: 'rgba(255, 255, 255, 0.9)',
-    marginTop: spacing.xs,
-  },
-  pendingTransactionsArrow: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
 });

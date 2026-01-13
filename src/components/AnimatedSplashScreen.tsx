@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   Animated,
-  useColorScheme,
 } from 'react-native';
 
 interface AnimatedSplashScreenProps {
@@ -14,8 +13,7 @@ interface AnimatedSplashScreenProps {
 export default function AnimatedSplashScreen({
   onAnimationComplete,
 }: AnimatedSplashScreenProps) {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  // Always use dark background so "PrintMail" text (white) is visible
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.3)).current;
@@ -63,7 +61,7 @@ export default function AnimatedSplashScreen({
       style={[
         styles.container,
         {
-          backgroundColor: isDark ? '#0f172a' : '#ffffff',
+          backgroundColor: '#0f172a', // Always dark so white "PrintMail" text is visible
           opacity: fadeOutAnim,
         },
       ]}

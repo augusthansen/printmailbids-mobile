@@ -21,6 +21,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Invoice, Listing, ListingImage, Profile, PaymentMethod } from '../../types/database';
 import { spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
+import { API_URL } from '../../constants/config';
 import { formatCurrency } from '../../utils/formatters';
 import { lightTap, successFeedback, errorFeedback, mediumTap } from '../../utils/haptics';
 import { DashboardStackParamList } from '../../navigation/types';
@@ -49,6 +50,7 @@ export default function CheckoutScreen() {
   const [selectedPayment, setSelectedPayment] = useState<PaymentOption | null>(null);
   const [showWireInstructions, setShowWireInstructions] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [wireRequestSent, setWireRequestSent] = useState(false);
 
   const { data: invoice, isLoading } = useQuery<InvoiceWithDetails>({
     queryKey: ['invoice', invoiceId],
@@ -150,12 +152,77 @@ export default function CheckoutScreen() {
     navigation.goBack();
   };
 
+  // Request wire instructions from seller via API (enables push notifications)
+  const requestWireInstructionsMutation = useMutation({
+    mutationFn: async () => {
+      if (!invoice) throw new Error('Invoice not found');
+
+      console.log('[Wire Request] Starting request for invoice:', invoiceId);
+
+      // Get auth session for API call
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Not authenticated');
+      }
+
+      // Call API endpoint to request wire instructions (sends push notification)
+      const response = await fetch(`${API_URL}/wire/request-instructions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ invoiceId }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        console.error('[Wire Request] API error:', result.error);
+        throw new Error(result.error || 'Failed to request wire instructions');
+      }
+
+      console.log('[Wire Request] Success:', result);
+      return result;
+    },
+    onSuccess: () => {
+      successFeedback();
+      setWireRequestSent(true);
+      queryClient.invalidateQueries({ queryKey: ['invoice', invoiceId] });
+      Alert.alert(
+        'Request Sent',
+        'We\'ve notified the seller that you\'d like to pay by wire transfer. They\'ll be asked to add their wire details. You\'ll be notified when wire payment becomes available.',
+        [{ text: 'OK' }]
+      );
+    },
+    onError: () => {
+      errorFeedback();
+      Alert.alert('Error', 'Failed to send request. Please try again.');
+    },
+  });
+
+  const handleRequestWireInstructions = () => {
+    lightTap();
+    Alert.alert(
+      'Request Wire Payment',
+      `Would you like to request wire transfer details from ${invoice?.seller?.company_name || invoice?.seller?.full_name || 'the seller'}? They'll be notified to add their banking information.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send Request',
+          onPress: () => requestWireInstructionsMutation.mutate(),
+        },
+      ]
+    );
+  };
+
   const primaryImage = invoice?.listing?.images?.find(img => img.is_primary) || invoice?.listing?.images?.[0];
 
   // Check which payment methods are accepted
   const acceptsCard = invoice?.listing?.accepts_credit_card !== false;
   const acceptsACH = invoice?.listing?.accepts_ach !== false;
-  const acceptsWire = invoice?.listing?.accepts_wire !== false && invoice?.seller?.wire_bank_name;
+  const acceptsWire = invoice?.listing?.accepts_wire !== false;
+  const sellerHasWireDetails = !!invoice?.seller?.wire_bank_name && !!invoice?.seller?.wire_routing_number;
 
   if (isLoading) {
     return (
@@ -304,11 +371,14 @@ export default function CheckoutScreen() {
           )}
 
           {/* Wire Transfer Option */}
-          {acceptsWire && (
+          {acceptsWire && sellerHasWireDetails && (
             <TouchableOpacity
               style={[
                 styles.paymentOption,
-                { backgroundColor: themeColors.surface, borderColor: selectedPayment === 'wire' ? themeColors.accent : themeColors.border },
+                {
+                  backgroundColor: themeColors.surface,
+                  borderColor: selectedPayment === 'wire' ? themeColors.accent : themeColors.border,
+                },
                 selectedPayment === 'wire' && styles.paymentOptionSelected,
               ]}
               onPress={() => handlePaymentSelect('wire')}
@@ -335,6 +405,56 @@ export default function CheckoutScreen() {
                 )}
               </View>
             </TouchableOpacity>
+          )}
+
+          {/* Wire Transfer Request Option - shown when seller hasn't set up wire */}
+          {acceptsWire && !sellerHasWireDetails && (
+            <View
+              style={[
+                styles.paymentOption,
+                {
+                  backgroundColor: themeColors.surface,
+                  borderColor: themeColors.border,
+                },
+              ]}
+            >
+              <View style={[styles.paymentIcon, { backgroundColor: isDark ? '#1e3a5f' : '#dbeafe' }]}>
+                <Feather name="send" size={20} color="#2563eb" />
+              </View>
+              <View style={styles.paymentInfo}>
+                <Text style={[styles.paymentTitle, { color: themeColors.textPrimary }]}>Wire Transfer</Text>
+                {wireRequestSent || invoice?.wire_requested_at ? (
+                  <View style={styles.wireRequestedBadge}>
+                    <Feather name="check-circle" size={12} color={themeColors.success} />
+                    <Text style={[styles.wireRequestedText, { color: themeColors.success }]}>
+                      Request sent to seller
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <Text style={[styles.paymentDescription, { color: themeColors.textMuted }]}>
+                      Seller hasn't set up wire details yet
+                    </Text>
+                    <TouchableOpacity
+                      style={[styles.requestWireButton, { backgroundColor: themeColors.accentFaint }]}
+                      onPress={handleRequestWireInstructions}
+                      disabled={requestWireInstructionsMutation.isPending}
+                    >
+                      {requestWireInstructionsMutation.isPending ? (
+                        <ActivityIndicator size="small" color={themeColors.accent} />
+                      ) : (
+                        <>
+                          <Feather name="mail" size={14} color={themeColors.accent} />
+                          <Text style={[styles.requestWireButtonText, { color: themeColors.accent }]}>
+                            Request Wire Instructions
+                          </Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
+            </View>
           )}
 
           {/* Wire Transfer Note */}
@@ -682,6 +802,30 @@ const styles = StyleSheet.create({
   },
   wireBadgeText: {
     fontSize: fontSize.xs,
+    fontWeight: fontWeight.medium,
+  },
+  requestWireButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.md,
+    marginTop: spacing.sm,
+  },
+  requestWireButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+  },
+  wireRequestedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  wireRequestedText: {
+    fontSize: fontSize.sm,
     fontWeight: fontWeight.medium,
   },
   radioOuter: {

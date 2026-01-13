@@ -18,6 +18,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { spacing, borderRadius, fontSize, fontWeight, shadows } from '../../constants/theme';
+import { API_URL } from '../../constants/config';
 import { mediumTap, successFeedback, errorFeedback } from '../../utils/haptics';
 
 export default function WireInstructionsScreen() {
@@ -75,6 +76,9 @@ export default function WireInstructionsScreen() {
     setIsSaving(true);
 
     try {
+      // Check if seller previously had no wire info (to know if we should notify buyers)
+      const hadNoWireInfo = !profile.wire_bank_name;
+
       const { error } = await supabase
         .from('profiles')
         .update({
@@ -91,6 +95,11 @@ export default function WireInstructionsScreen() {
 
       if (error) throw error;
 
+      // If seller just added wire info (didn't have it before), notify buyers who requested it
+      if (hadNoWireInfo && bankName.trim()) {
+        await notifyBuyersWireInstructionsAvailable();
+      }
+
       await refreshProfile();
       successFeedback();
       Alert.alert('Success', 'Wire transfer instructions saved successfully.');
@@ -101,6 +110,40 @@ export default function WireInstructionsScreen() {
       Alert.alert('Error', 'Failed to save wire instructions. Please try again.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // Notify buyers who requested wire instructions that they are now available (via API for push notifications)
+  const notifyBuyersWireInstructionsAvailable = async () => {
+    if (!profile) return;
+
+    try {
+      // Get auth session for API call
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        console.error('[Wire Instructions] Not authenticated');
+        return;
+      }
+
+      // Call API endpoint to notify buyers (sends in-app + push notifications)
+      const response = await fetch(`${API_URL}/wire/notify-available`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        console.error('[Wire Instructions] API error:', result.error);
+        return;
+      }
+
+      console.log(`[Wire Instructions] Notified ${result.notified} buyers, ${result.pushSent} push notifications sent`);
+    } catch (error) {
+      console.error('Error notifying buyers about wire instructions:', error);
     }
   };
 

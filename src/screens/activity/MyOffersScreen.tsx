@@ -27,13 +27,6 @@ import { API_URL } from '../../constants/config';
 type ViewMode = 'sent' | 'received';
 type FilterType = 'all' | 'pending' | 'accepted' | 'declined' | 'countered' | 'expired' | 'withdrawn';
 
-interface ParentOfferInfo {
-  id: string;
-  buyer_id: string;
-  seller_id: string;
-  parent_offer_id: string | null;
-}
-
 interface OfferWithDetails extends Offer {
   listing: Listing & {
     images: ListingImage[];
@@ -41,7 +34,6 @@ interface OfferWithDetails extends Offer {
   buyer?: Profile;
   seller?: Profile;
   counter_offer?: Offer;
-  parent_offer?: ParentOfferInfo | null;
 }
 
 const FILTERS: { key: FilterType; label: string }[] = [
@@ -53,37 +45,19 @@ const FILTERS: { key: FilterType; label: string }[] = [
   { key: 'withdrawn', label: 'Withdrawn' },
 ];
 
-// Helper function to determine who made a counter offer
-// Returns 'buyer' if the buyer made this counter, 'seller' if seller made it
-// For original offers (no parent), returns 'buyer' (since buyer always makes the first offer)
+// Helper function to determine who made an offer/counter-offer
+// Uses counter_count to determine the maker:
+// - counter_count = 0: Original offer, always made by buyer
+// - counter_count = 1: First counter, made by seller
+// - counter_count = 2: Second counter, made by buyer
+// - counter_count = 3: Third counter, made by seller
+// Pattern: even = buyer, odd = seller
 function getOfferMaker(offer: OfferWithDetails): 'buyer' | 'seller' {
-  if (!offer.parent_offer_id) {
-    // Original offer - always made by buyer
-    return 'buyer';
-  }
+  const counterCount = offer.counter_count || 0;
 
-  // For counter offers, we alternate from the parent
-  // If parent was made by buyer (original or buyer counter), this counter is by seller
-  // If parent was made by seller (seller counter), this counter is by buyer
-  const parentOffer = offer.parent_offer;
-  if (!parentOffer) {
-    // Fallback: if we don't have parent info, assume odd counters are seller, even are buyer
-    // This is a rough heuristic based on counter_count
-    return (offer.counter_count || 0) % 2 === 1 ? 'seller' : 'buyer';
-  }
-
-  // Recursively determine: if parent was made by buyer, this is seller's counter (and vice versa)
-  // For simplicity, we check if parent has no parent_offer_id (buyer made it)
-  // or if parent has parent_offer_id (alternating)
-  if (!parentOffer.parent_offer_id) {
-    // Parent was original offer by buyer → this counter is by seller
-    return 'seller';
-  } else {
-    // Parent was itself a counter - need to determine who made parent
-    // For now, use counter_count: odd = seller counter, even = buyer counter
-    // counter_count 1 = seller's first counter, 2 = buyer's counter, 3 = seller's counter, etc.
-    return (offer.counter_count || 0) % 2 === 1 ? 'seller' : 'buyer';
-  }
+  // Even counter_count (0, 2, 4...) = buyer made this offer
+  // Odd counter_count (1, 3, 5...) = seller made this offer
+  return counterCount % 2 === 0 ? 'buyer' : 'seller';
 }
 
 export default function MyOffersScreen() {
@@ -125,8 +99,7 @@ export default function MyOffersScreen() {
             images:listing_images(*)
           ),
           buyer:profiles!buyer_id(*),
-          seller:profiles!seller_id(*),
-          parent_offer:offers!parent_offer_id(id, buyer_id, seller_id, parent_offer_id)
+          seller:profiles!seller_id(*)
         `)
         .order('created_at', { ascending: false });
 
@@ -138,6 +111,18 @@ export default function MyOffersScreen() {
 
       const { data, error } = await query;
       if (error) throw error;
+
+      // Debug: log all fetched offers
+      console.log(`[MyOffers Query] Fetched ${data?.length || 0} offers for viewMode=${viewMode}:`,
+        data?.map(o => ({
+          id: o.id.substring(0, 8),
+          status: o.status,
+          counter_count: o.counter_count,
+          amount: o.amount,
+          listing: o.listing?.title?.substring(0, 20),
+        }))
+      );
+
       return (data || []) as OfferWithDetails[];
     },
     enabled: !!user,
@@ -147,6 +132,9 @@ export default function MyOffersScreen() {
   const acceptMutation = useMutation({
     mutationFn: async (offer: OfferWithDetails) => {
       if (!session) throw new Error('Not authenticated');
+
+      console.log('[Accept Offer] Starting accept for offer:', offer.id);
+      console.log('[Accept Offer] API URL:', `${API_URL}/offers/respond`);
 
       const response = await fetch(`${API_URL}/offers/respond`, {
         method: 'POST',
@@ -160,10 +148,14 @@ export default function MyOffersScreen() {
         }),
       });
 
+      console.log('[Accept Offer] Response status:', response.status);
+
       const result = await response.json();
+      console.log('[Accept Offer] Response body:', JSON.stringify(result));
 
       if (!response.ok) {
-        throw new Error(result.error || 'Failed to accept offer');
+        console.error('[Accept Offer] Error:', result.error || result.message || 'Unknown error');
+        throw new Error(result.error || result.message || 'Failed to accept offer');
       }
 
       return { invoiceId: result.invoiceId, isBuyer: user?.id === offer.buyer_id };
@@ -196,8 +188,9 @@ export default function MyOffersScreen() {
         Alert.alert('Offer Accepted', 'An invoice has been created and the buyer has been notified.');
       }
     },
-    onError: () => {
-      Alert.alert('Error', 'Failed to accept offer. Please try again.');
+    onError: (error: Error) => {
+      console.error('[Accept Offer] Mutation error:', error.message);
+      Alert.alert('Error', error.message || 'Failed to accept offer. Please try again.');
     },
   });
 
@@ -272,7 +265,27 @@ export default function MyOffersScreen() {
   });
 
   const filteredOffers = offers?.filter(offer => {
-    if (filter === 'all') return true;
+    const listingStatus = offer.listing?.status;
+
+    // If the listing is sold, hide ALL offers for that listing
+    // The transaction is complete - no offers are "open"
+    if (listingStatus === 'sold') {
+      return false;
+    }
+
+    // Only show active/actionable offers:
+    // - pending: awaiting response
+    // - countered: awaiting response to counter
+    // - accepted: needs payment (buyer should see this until they pay)
+    // Hide: declined, expired, withdrawn (these are terminal states with no action needed)
+    const activeStatuses = ['pending', 'countered', 'accepted'];
+
+    // For "all" filter, only show active offers
+    if (filter === 'all') {
+      return activeStatuses.includes(offer.status);
+    }
+
+    // For specific filter, match that status
     return offer.status === filter;
   }) || [];
 
@@ -365,6 +378,25 @@ export default function MyOffersScreen() {
       (viewMode === 'received' && offerMaker === 'buyer') ||  // Seller viewing buyer's offer
       (viewMode === 'sent' && offerMaker === 'seller')        // Buyer viewing seller's counter
     );
+
+    // Debug logging - verbose for troubleshooting
+    console.log('[Offer Debug]', JSON.stringify({
+      offerId: item.id,
+      listingTitle: item.listing?.title?.substring(0, 30),
+      status: item.status,
+      viewMode,
+      offerMaker,
+      counter_count: item.counter_count,
+      parent_offer_id: item.parent_offer_id,
+      isPending,
+      canTakeAction,
+      buyer_id: item.buyer_id,
+      seller_id: item.seller_id,
+      current_user: user?.id,
+      isSeller: user?.id === item.seller_id,
+      isBuyer: user?.id === item.buyer_id,
+      amount: item.amount,
+    }, null, 2));
 
     return (
       <TouchableOpacity
@@ -522,6 +554,9 @@ export default function MyOffersScreen() {
       )}
     </View>
   );
+
+  // Debug: log profile seller status
+  console.log('[MyOffers] Profile is_seller:', profile?.is_seller, 'Current viewMode:', viewMode);
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>

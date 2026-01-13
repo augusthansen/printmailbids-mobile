@@ -22,7 +22,8 @@ export type NotificationType =
   | 'item_shipped' | 'item_delivered' | 'shipping_quote_received' | 'shipping_quote_requested'
   | 'fees_added' | 'fees_approved' | 'fees_rejected'
   | 'buyer_message' | 'review_received' | 'payout_processed'
-  | 'new_listing_saved_search' | 'price_drop';
+  | 'new_listing_saved_search' | 'price_drop'
+  | 'wire_instructions_requested';
 
 // Core Tables
 export interface Profile {
@@ -335,6 +336,7 @@ export interface Invoice {
   internal_notes: string | null;
 
   // Wire Transfer
+  wire_requested_at: string | null;
   wire_initiated_at: string | null;
   wire_reference_number: string | null;
   wire_confirmed_at: string | null;

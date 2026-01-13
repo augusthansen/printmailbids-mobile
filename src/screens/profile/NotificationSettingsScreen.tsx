@@ -307,6 +307,125 @@ export default function NotificationSettingsScreen() {
         </Text>
       </View>
 
+      {/* Test Wire Payment Flow */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Test Wire Payment Flow</Text>
+        <TouchableOpacity
+          style={[styles.testButton, { backgroundColor: colors.warning }]}
+          onPress={async () => {
+            mediumTap();
+            try {
+              const { data: { session } } = await supabase.auth.getSession();
+              if (!session?.access_token) {
+                Alert.alert('Error', 'Not authenticated');
+                return;
+              }
+
+              // Test wire request notification (simulates buyer requesting wire from seller)
+              const response = await fetch(`${API_URL}/test/push-notification`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${session.access_token}`,
+                },
+                body: JSON.stringify({
+                  type: 'payment_reminder',
+                  title: 'Wire Payment Requested',
+                  body: 'Test Buyer would like to pay by wire transfer for "Test Equipment". Please add your wire transfer details in Seller Settings.',
+                }),
+              });
+
+              const result = await response.json();
+              console.log('[Test Wire Request] Response:', result);
+
+              if (response.ok && result.success) {
+                const versionInfo = result.apiVersion ? `\n\nAPI v${result.apiVersion}` : '\n\n(Old API - no version)';
+                if (result.pushSent) {
+                  successFeedback();
+                  Alert.alert('Sent!', `Wire Payment Requested notification sent with title: "${result.customTitle || 'default'}"${versionInfo}`);
+                } else {
+                  errorFeedback();
+                  const debugInfo = result.debug
+                    ? `\n\nDebug:\n- notify_push: ${result.debug.notify_push}\n- hasToken: ${result.debug.hasToken}\n- tokenPrefix: ${result.debug.tokenPrefix || 'none'}`
+                    : '';
+                  Alert.alert(
+                    'Push Not Sent',
+                    `Notification created in database but push failed.\n\nReason: ${result.error || 'Check debug info'}${debugInfo}${versionInfo}`
+                  );
+                }
+              } else {
+                errorFeedback();
+                Alert.alert('Error', result.error || 'Failed to send test notification');
+              }
+            } catch (error) {
+              console.error('[Test Wire Request] Error:', error);
+              errorFeedback();
+              Alert.alert('Error', 'Failed to send test notification');
+            }
+          }}
+        >
+          <Feather name="credit-card" size={18} color="#ffffff" />
+          <Text style={styles.testButtonText}>Test Wire Request (Seller)</Text>
+        </TouchableOpacity>
+        <Text style={[styles.testHint, { color: colors.textMuted }]}>
+          Simulates a buyer requesting wire instructions. Tap the notification to go to Wire Instructions.
+        </Text>
+
+        <TouchableOpacity
+          style={[styles.testButton, { backgroundColor: colors.success, marginTop: spacing.md }]}
+          onPress={async () => {
+            mediumTap();
+            try {
+              const { data: { session } } = await supabase.auth.getSession();
+              if (!session?.access_token) {
+                Alert.alert('Error', 'Not authenticated');
+                return;
+              }
+
+              // Test wire available notification (simulates seller adding wire instructions)
+              const response = await fetch(`${API_URL}/test/push-notification`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${session.access_token}`,
+                },
+                body: JSON.stringify({
+                  type: 'payment_reminder',
+                  title: 'Wire Instructions Available',
+                  body: 'Test Seller has provided wire transfer instructions for "Test Equipment". You can now complete your payment.',
+                }),
+              });
+
+              const result = await response.json();
+              console.log('[Test Wire Available] Response:', result);
+
+              if (response.ok && result.success) {
+                if (result.pushSent) {
+                  successFeedback();
+                  Alert.alert('Sent!', 'Wire Instructions Available notification sent. Note: Tapping requires a valid invoice_id to navigate to Checkout.');
+                } else {
+                  errorFeedback();
+                  Alert.alert('Push Not Sent', `Notification created but push failed: ${result.error || 'Unknown'}`);
+                }
+              } else {
+                errorFeedback();
+                Alert.alert('Error', result.error || 'Failed to send test notification');
+              }
+            } catch (error) {
+              console.error('[Test Wire Available] Error:', error);
+              errorFeedback();
+              Alert.alert('Error', 'Failed to send test notification');
+            }
+          }}
+        >
+          <Feather name="check-circle" size={18} color="#ffffff" />
+          <Text style={styles.testButtonText}>Test Wire Available (Buyer)</Text>
+        </TouchableOpacity>
+        <Text style={[styles.testHint, { color: colors.textMuted }]}>
+          Simulates a seller adding wire instructions. Creates a notification for you to see in your dashboard.
+        </Text>
+      </View>
+
       {/* Quiet Hours (Future Feature) */}
       <View style={styles.section}>
         <View style={[styles.comingSoonCard, { backgroundColor: isDark ? colors.sand : '#ffffff' }]}>
